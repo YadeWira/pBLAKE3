@@ -1,0 +1,78 @@
+# pBLAKE3 on the 6 platforms of PJA: the official vectors, on the C path and the Pascal path.
+name: CI
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux-x64:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y fpc clang
+      - run: CC=clang sh build.sh
+  linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y fpc clang
+      - run: CC=clang sh build.sh
+  linux-x86:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y libc6:i386 gcc-multilib clang
+      - run: scripts/fpc-i386.sh /tmp/fpc-i386
+      - run: FPC=/tmp/fpc-i386/fpc CC="clang -m32" sh build.sh
+  macos-arm64:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install fpc
+      - run: sh build.sh
+  windows-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Free Pascal (win32 and win64)
+        shell: pwsh
+        run: |
+          $url = 'https://sourceforge.net/projects/freepascal/files/Win32/3.2.2/fpc-3.2.2.win32.and.win64.exe/download'
+          curl.exe -L --fail --retry 3 -o "$env:TEMP\fpc-setup.exe" $url
+          Start-Process -Wait -FilePath "$env:TEMP\fpc-setup.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-'
+          $fpc = Get-ChildItem C:\FPC -Recurse -Filter fpc.exe | Select-Object -First 1
+          if (-not $fpc) { throw 'fpc.exe not found after the installer' }
+          Split-Path $fpc.FullName | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
+      - run: C:\msys64\usr\bin\pacman.exe -S --noconfirm --needed mingw-w64-x86_64-clang
+        shell: pwsh
+      - shell: bash
+        env:
+          FPC: fpc -Px86_64
+          CC: /c/msys64/mingw64/bin/clang
+        run: sh build.sh
+  windows-x86:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Free Pascal (win32 and win64)
+        shell: pwsh
+        run: |
+          $url = 'https://sourceforge.net/projects/freepascal/files/Win32/3.2.2/fpc-3.2.2.win32.and.win64.exe/download'
+          curl.exe -L --fail --retry 3 -o "$env:TEMP\fpc-setup.exe" $url
+          Start-Process -Wait -FilePath "$env:TEMP\fpc-setup.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-'
+          $fpc = Get-ChildItem C:\FPC -Recurse -Filter fpc.exe | Select-Object -First 1
+          if (-not $fpc) { throw 'fpc.exe not found after the installer' }
+          Split-Path $fpc.FullName | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding ascii
+      - run: C:\msys64\usr\bin\pacman.exe -S --noconfirm --needed mingw-w64-i686-gcc
+        shell: pwsh
+      - shell: bash
+        env:
+          FPC: fpc -Pi386
+          CC: /c/msys64/mingw32/bin/gcc
+        run: sh build.sh
