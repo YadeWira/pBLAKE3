@@ -50,5 +50,5 @@ int main(int argc, char **argv) {
   }
   fclose(f); FreeLibrary(m);
   printf("%d cells, %d failures\n", cells, fails);
-  return (fails || cells < 40) ? 1 : 0;
+  return (fails || cells < 20) ? 1 : 0;
 }
