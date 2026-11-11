@@ -21,6 +21,7 @@ type
   TCvWords = array[0..7] of LongWord;
 
   { Incremental: Init, Update as many times as needed, Final. }
+  PBlake3 = ^TBlake3;
   TBlake3 = record
   private
     cv: array[0..7] of LongWord;          { the current chunk's chaining value }

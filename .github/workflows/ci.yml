@@ -55,7 +55,7 @@ jobs:
         env:
           FPC: fpc -Px86_64
           CC: /c/msys64/mingw64/bin/clang
-        run: sh build.sh
+        run: sh build.sh && sh dll.sh
   windows-x86:
     runs-on: windows-latest
     steps:
@@ -75,4 +75,4 @@ jobs:
         env:
           FPC: fpc -Pi386
           CC: /c/msys64/mingw32/bin/gcc
-        run: sh build.sh
+        run: sh build.sh && sh dll.sh
