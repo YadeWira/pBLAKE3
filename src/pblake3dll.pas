@@ -2,7 +2,7 @@
   The caller owns every buffer: the state is pblake3_state_size() bytes, no
   allocation here. A Pascal exception never crosses the boundary: calls
   return 0 on success, -1 on a bad argument. }
-library pblake3;
+library pblake3dll;
 {$I pja.inc}
 uses pjablake3, pblake3c;
 
@@ -17,24 +17,27 @@ function pblake3_state_size: SizeInt; cdecl;
 begin Result := SizeOf(TBlake3); end;
 
 function pblake3_init(st: Pointer): LongInt; cdecl;
+var b: PBlake3;
 begin
   if st = nil then Exit(-1);
-  PBlake3(st)^.Init; Result := 0;
+  b := PBlake3(st); b^.Init; Result := 0;
 end;
 
 function pblake3_update(st: Pointer; data: Pointer; len: SizeInt): LongInt; cdecl;
+var b: PBlake3;
 begin
   if (st = nil) or (len < 0) or ((data = nil) and (len > 0)) then Exit(-1);
-  if len > 0 then PBlake3(st)^.Update(data^, len);
+  b := PBlake3(st);
+  if len > 0 then b^.Update(data^, len);
   Result := 0;
 end;
 
 { out: 16 bytes (BLAKE3-128) }
 function pblake3_final(st: Pointer; outp: PByte): LongInt; cdecl;
-var h: THash16;
+var h: THash16; b: PBlake3;
 begin
   if (st = nil) or (outp = nil) then Exit(-1);
-  h := PBlake3(st)^.Final; Move(h, outp^, 16); Result := 0;
+  b := PBlake3(st); h := b^.Final; Move(h, outp^, 16); Result := 0;
 end;
 
 function pblake3_128(data: Pointer; len: SizeInt; outp: PByte): LongInt; cdecl;
