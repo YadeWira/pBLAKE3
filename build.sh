@@ -2,7 +2,7 @@
 # Build and test.  FPC=<compiler> CC=<C compiler> sh build.sh [extra C flags]
 # The C object must not need libgcc (no 64-bit division, etc.): checked with nm -u.
 set -eu
-HERE=$(cd "$(dirname "$0")" && pwd); OUT=${B3_OUT:-$HERE/build}
+cd "$(dirname "$0")"; HERE=.; OUT=${B3_OUT:-build}   # relative paths: a native Windows fpc cannot read MSYS paths
 FPC=${FPC:-fpc}; CC=${CC:-cc}
 case $CC in /*) PATH=$(dirname "${CC%% *}"):$PATH; export PATH ;; esac
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) EXE=.exe ;; *) EXE= ;; esac
