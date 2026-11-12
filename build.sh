@@ -20,6 +20,15 @@ if command -v "$NM" >/dev/null; then
   if [ -n "$bad" ]; then echo "b3chunks.o needs the runtime:"; echo "$bad"; exit 1; fi
   echo "$NM -u: b3chunks.o needs nothing"
 fi
+# the chunk routine (SSE2 / NEON where there is one) against the plain one, and how fast each is; not for cross builds
+if [ -z "$RUN" ]; then
+  # shellcheck disable=SC2086
+  $CC $FLAGS "$@" -DB3_PLAIN -Dpblake3_chunks=pblake3_chunks_plain -c "$HERE/src/b3chunks.c" -o "$OUT/b3plain.o"
+  # shellcheck disable=SC2086
+  $CC -O2 "$@" "$HERE/tests/chunks_diff.c" "$OUT/b3chunks.o" "$OUT/b3plain.o" -o "$OUT/chunks_diff$EXE"
+  "$OUT/chunks_diff$EXE" | tr -d '\r' | tee "$OUT/diff.txt"
+  grep -q ' 0 differences' "$OUT/diff.txt"
+fi
 $FPC -O3 -Fu"$HERE/src" -Fi"$HERE/src" -Fo"$OUT" -FU"$OUT" -o"$OUT/test_blake3$EXE" "$HERE/tests/test_blake3.pas" >"$OUT/fpc.log" 2>&1 \
   || { cat "$OUT/fpc.log"; exit 1; }
 $RUN "$OUT/test_blake3$EXE" "$HERE/tests/kat.txt" | tr -d '\r' | tail -3
