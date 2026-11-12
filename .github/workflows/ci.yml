@@ -56,6 +56,13 @@ jobs:
           FPC: fpc -Px86_64
           CC: /c/msys64/mingw64/bin/clang
         run: sh build.sh && sh dll.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dll-windows-x64
+          path: |
+            build/pblake3.dll
+            build/dll_test.exe
+            tests/kat.txt
   windows-x86:
     runs-on: windows-latest
     steps:
@@ -76,3 +83,10 @@ jobs:
           FPC: fpc -Pi386
           CC: /c/msys64/mingw32/bin/gcc
         run: sh build.sh && sh dll.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dll-windows-x86
+          path: |
+            build/pblake3.dll
+            build/dll_test.exe
+            tests/kat.txt
