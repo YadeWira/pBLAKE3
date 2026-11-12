@@ -13,13 +13,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y fpc clang
-      - run: CC=clang sh build.sh
+      - run: CC=clang sh build.sh && CC=clang sh lib.sh
   linux-arm64:
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y fpc clang
-      - run: CC=clang sh build.sh
+      - run: CC=clang sh build.sh && CC=clang sh lib.sh
   linux-x86:
     runs-on: ubuntu-24.04
     steps:
@@ -29,13 +29,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libc6:i386 gcc-multilib clang
       - run: scripts/fpc-i386.sh /tmp/fpc-i386
-      - run: FPC=/tmp/fpc-i386/fpc CC="clang -m32" sh build.sh
+      - run: FPC=/tmp/fpc-i386/fpc CC="clang -m32" sh build.sh && FPC=/tmp/fpc-i386/fpc CC="clang -m32" sh lib.sh
   macos-arm64:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - run: brew install fpc
-      - run: sh build.sh
+      - run: sh build.sh && sh lib.sh
   windows-x64:
     runs-on: windows-latest
     steps:
@@ -55,14 +55,14 @@ jobs:
         env:
           FPC: fpc -Px86_64
           CC: /c/msys64/mingw64/bin/clang
-        run: sh build.sh && sh dll.sh
+        run: sh build.sh && sh lib.sh
       - uses: actions/upload-artifact@v4
         with:
           name: dll-windows-x64
           path: |
             build/pblake3.dll
-            build/dll_test.exe
-            tests/kat.txt
+            build/api_test.exe
+            tests/official_hash.txt
   windows-x86:
     runs-on: windows-latest
     steps:
@@ -82,11 +82,11 @@ jobs:
         env:
           FPC: fpc -Pi386
           CC: /c/msys64/mingw32/bin/gcc
-        run: sh build.sh && sh dll.sh
+        run: sh build.sh && sh lib.sh
       - uses: actions/upload-artifact@v4
         with:
           name: dll-windows-x86
           path: |
             build/pblake3.dll
-            build/dll_test.exe
-            tests/kat.txt
+            build/api_test.exe
+            tests/official_hash.txt
