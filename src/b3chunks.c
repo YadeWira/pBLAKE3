@@ -1,9 +1,17 @@
 /* pBLAKE3: BLAKE3 chunks, several at once (pjablake3.Blake3Chunks).
    Every full chunk that is not the last one of the input gets its chaining
-   value here, four at a time in SSE2 or NEON (one chunk per 32-bit lane),
-   the rest one at a time. No memory taken, no library called. Plain path: build with
+   value here, many at a time with one chunk per 32-bit lane: 4 (SSE2 or
+   NEON), 8 (AVX2) or 16 (AVX-512), chosen when first called by what the CPU
+   (and the OS) can do; the rest one at a time. No memory taken, no library called. Plain path: build with
    -DB3_PLAIN (or no SSE2); both give the same words. */
 #include <stdint.h>
+/* AVX2 and AVX-512 are compiled whatever the baseline is (target attributes) and used only
+   where cpuid and xgetbv say the CPU and the OS support them */
+#if (defined(__x86_64__) || defined(__i386__)) && defined(__GNUC__) && !defined(B3_PLAIN) && !defined(B3_NO_AVX)
+#include <immintrin.h>
+#include <cpuid.h>
+#define B3_X86WIDE 1
+#endif
 #if defined(__SSE2__) && !defined(B3_PLAIN)
 #include <emmintrin.h>
 #define B3_SSE2 1
@@ -182,12 +190,180 @@ static void b3chunk4(const uint8_t *in, uint64_t counter, uint32_t *cv) {
 }
 #endif
 
+
+#ifdef B3_X86WIDE
+#define T_AVX2 __attribute__((target("avx2")))
+#define T_AVX512 __attribute__((target("avx512f,avx2")))
+
+/* ---- AVX2: eight chunks at once ---- */
+#define ROT8V(x, c) _mm256_or_si256(_mm256_srli_epi32((x), (c)), _mm256_slli_epi32((x), 32 - (c)))
+T_AVX2 static inline __m256i rotb2(__m256i x, int s) {
+  /* rotate by whole bytes (16 and 8 bits) with a byte shuffle */
+  const __m256i m16 = _mm256_setr_epi8(2,3,0,1,6,7,4,5,10,11,8,9,14,15,12,13, 2,3,0,1,6,7,4,5,10,11,8,9,14,15,12,13);
+  const __m256i m8 = _mm256_setr_epi8(1,2,3,0,5,6,7,4,9,10,11,8,13,14,15,12, 1,2,3,0,5,6,7,4,9,10,11,8,13,14,15,12);
+  return _mm256_shuffle_epi8(x, s == 16 ? m16 : m8);
+}
+T_AVX2 static inline void g8(__m256i *v, int a, int b, int c, int d, __m256i x, __m256i y) {
+  v[a] = _mm256_add_epi32(_mm256_add_epi32(v[a], v[b]), x); v[d] = rotb2(_mm256_xor_si256(v[d], v[a]), 16);
+  v[c] = _mm256_add_epi32(v[c], v[d]); v[b] = ROT8V(_mm256_xor_si256(v[b], v[c]), 12);
+  v[a] = _mm256_add_epi32(_mm256_add_epi32(v[a], v[b]), y); v[d] = rotb2(_mm256_xor_si256(v[d], v[a]), 8);
+  v[c] = _mm256_add_epi32(v[c], v[d]); v[b] = ROT8V(_mm256_xor_si256(v[b], v[c]), 7);
+}
+/* eight rows of eight words to eight columns */
+T_AVX2 static inline void transpose8(__m256i *r) {
+  __m256i t0 = _mm256_unpacklo_epi32(r[0], r[1]), t1 = _mm256_unpackhi_epi32(r[0], r[1]);
+  __m256i t2 = _mm256_unpacklo_epi32(r[2], r[3]), t3 = _mm256_unpackhi_epi32(r[2], r[3]);
+  __m256i t4 = _mm256_unpacklo_epi32(r[4], r[5]), t5 = _mm256_unpackhi_epi32(r[4], r[5]);
+  __m256i t6 = _mm256_unpacklo_epi32(r[6], r[7]), t7 = _mm256_unpackhi_epi32(r[6], r[7]);
+  __m256i u0 = _mm256_unpacklo_epi64(t0, t2), u1 = _mm256_unpackhi_epi64(t0, t2);
+  __m256i u2 = _mm256_unpacklo_epi64(t1, t3), u3 = _mm256_unpackhi_epi64(t1, t3);
+  __m256i u4 = _mm256_unpacklo_epi64(t4, t6), u5 = _mm256_unpackhi_epi64(t4, t6);
+  __m256i u6 = _mm256_unpacklo_epi64(t5, t7), u7 = _mm256_unpackhi_epi64(t5, t7);
+  r[0] = _mm256_permute2x128_si256(u0, u4, 0x20); r[1] = _mm256_permute2x128_si256(u1, u5, 0x20);
+  r[2] = _mm256_permute2x128_si256(u2, u6, 0x20); r[3] = _mm256_permute2x128_si256(u3, u7, 0x20);
+  r[4] = _mm256_permute2x128_si256(u0, u4, 0x31); r[5] = _mm256_permute2x128_si256(u1, u5, 0x31);
+  r[6] = _mm256_permute2x128_si256(u2, u6, 0x31); r[7] = _mm256_permute2x128_si256(u3, u7, 0x31);
+}
+T_AVX2 static void b3chunk8(const uint8_t *in, uint64_t counter, uint32_t *cv) {
+  __m256i h[8], v[16], m[16], t[8];
+  int i, b, r, l;
+  uint32_t lw[8], hw[8];
+  __m256i lo, hi;
+  for (l = 0; l < 8; l++) { lw[l] = (uint32_t)(counter + (uint64_t)l); hw[l] = (uint32_t)((counter + (uint64_t)l) >> 32); }
+  lo = _mm256_loadu_si256((const __m256i *)lw); hi = _mm256_loadu_si256((const __m256i *)hw);
+  for (i = 0; i < 8; i++) h[i] = _mm256_set1_epi32((int)B3IV[i]);
+  for (b = 0; b < B3_BLOCKS; b++) {
+    for (l = 0; l < 8; l++) t[l] = _mm256_loadu_si256((const __m256i *)(in + 1024 * l + 64 * b));
+    transpose8(t); for (i = 0; i < 8; i++) m[i] = t[i];
+    for (l = 0; l < 8; l++) t[l] = _mm256_loadu_si256((const __m256i *)(in + 1024 * l + 64 * b + 32));
+    transpose8(t); for (i = 0; i < 8; i++) m[8 + i] = t[i];
+    for (i = 0; i < 8; i++) v[i] = h[i];
+    for (i = 0; i < 4; i++) v[i + 8] = _mm256_set1_epi32((int)B3IV[i]);
+    v[12] = lo; v[13] = hi; v[14] = _mm256_set1_epi32(64);
+    v[15] = _mm256_set1_epi32((b == 0 ? B3_CHUNK_START : 0) | (b == B3_BLOCKS - 1 ? B3_CHUNK_END : 0));
+    for (r = 0; r < 7; r++) {
+      const uint8_t *q = B3SCHED[r];
+      g8(v, 0, 4, 8, 12, m[q[0]], m[q[1]]);
+      g8(v, 1, 5, 9, 13, m[q[2]], m[q[3]]);
+      g8(v, 2, 6, 10, 14, m[q[4]], m[q[5]]);
+      g8(v, 3, 7, 11, 15, m[q[6]], m[q[7]]);
+      g8(v, 0, 5, 10, 15, m[q[8]], m[q[9]]);
+      g8(v, 1, 6, 11, 12, m[q[10]], m[q[11]]);
+      g8(v, 2, 7, 8, 13, m[q[12]], m[q[13]]);
+      g8(v, 3, 4, 9, 14, m[q[14]], m[q[15]]);
+    }
+    for (i = 0; i < 8; i++) h[i] = _mm256_xor_si256(v[i], v[i + 8]);
+  }
+  transpose8(h);
+  for (l = 0; l < 8; l++) _mm256_storeu_si256((__m256i *)(cv + 8 * l), h[l]);
+}
+
+/* ---- AVX-512F: sixteen chunks at once ---- */
+T_AVX512 static inline void g16(__m512i *v, int a, int b, int c, int d, __m512i x, __m512i y) {
+  v[a] = _mm512_add_epi32(_mm512_add_epi32(v[a], v[b]), x); v[d] = _mm512_ror_epi32(_mm512_xor_si512(v[d], v[a]), 16);
+  v[c] = _mm512_add_epi32(v[c], v[d]); v[b] = _mm512_ror_epi32(_mm512_xor_si512(v[b], v[c]), 12);
+  v[a] = _mm512_add_epi32(_mm512_add_epi32(v[a], v[b]), y); v[d] = _mm512_ror_epi32(_mm512_xor_si512(v[d], v[a]), 8);
+  v[c] = _mm512_add_epi32(v[c], v[d]); v[b] = _mm512_ror_epi32(_mm512_xor_si512(v[b], v[c]), 7);
+}
+/* sixteen rows of sixteen words to sixteen columns */
+T_AVX512 static inline void transpose16(__m512i *r) {
+  __m512i t[16], u[16], a0, a1, b0, b1;
+  int i, k;
+  for (i = 0; i < 8; i++) { t[2 * i] = _mm512_unpacklo_epi32(r[2 * i], r[2 * i + 1]); t[2 * i + 1] = _mm512_unpackhi_epi32(r[2 * i], r[2 * i + 1]); }
+  for (i = 0; i < 4; i++) {
+    u[4 * i] = _mm512_unpacklo_epi64(t[4 * i], t[4 * i + 2]); u[4 * i + 1] = _mm512_unpackhi_epi64(t[4 * i], t[4 * i + 2]);
+    u[4 * i + 2] = _mm512_unpacklo_epi64(t[4 * i + 1], t[4 * i + 3]); u[4 * i + 3] = _mm512_unpackhi_epi64(t[4 * i + 1], t[4 * i + 3]);
+  }
+  for (k = 0; k < 4; k++) {
+    a0 = _mm512_shuffle_i32x4(u[k], u[4 + k], 0x88); a1 = _mm512_shuffle_i32x4(u[k], u[4 + k], 0xDD);
+    b0 = _mm512_shuffle_i32x4(u[8 + k], u[12 + k], 0x88); b1 = _mm512_shuffle_i32x4(u[8 + k], u[12 + k], 0xDD);
+    r[k] = _mm512_shuffle_i32x4(a0, b0, 0x88); r[k + 4] = _mm512_shuffle_i32x4(a1, b1, 0x88);
+    r[k + 8] = _mm512_shuffle_i32x4(a0, b0, 0xDD); r[k + 12] = _mm512_shuffle_i32x4(a1, b1, 0xDD);
+  }
+}
+T_AVX512 static void b3chunk16(const uint8_t *in, uint64_t counter, uint32_t *cv) {
+  __m512i h[8], v[16], m[16], t[16];
+  int i, b, r, l;
+  uint32_t lw[16], hw[16];
+  __m512i lo, hi;
+  for (l = 0; l < 16; l++) { lw[l] = (uint32_t)(counter + (uint64_t)l); hw[l] = (uint32_t)((counter + (uint64_t)l) >> 32); }
+  lo = _mm512_loadu_si512((const void *)lw); hi = _mm512_loadu_si512((const void *)hw);
+  for (i = 0; i < 8; i++) h[i] = _mm512_set1_epi32((int)B3IV[i]);
+  for (b = 0; b < B3_BLOCKS; b++) {
+    for (l = 0; l < 16; l++) t[l] = _mm512_loadu_si512((const void *)(in + 1024 * l + 64 * b));
+    transpose16(t); for (i = 0; i < 16; i++) m[i] = t[i];
+    for (i = 0; i < 8; i++) v[i] = h[i];
+    for (i = 0; i < 4; i++) v[i + 8] = _mm512_set1_epi32((int)B3IV[i]);
+    v[12] = lo; v[13] = hi; v[14] = _mm512_set1_epi32(64);
+    v[15] = _mm512_set1_epi32((b == 0 ? B3_CHUNK_START : 0) | (b == B3_BLOCKS - 1 ? B3_CHUNK_END : 0));
+    for (r = 0; r < 7; r++) {
+      const uint8_t *q = B3SCHED[r];
+      g16(v, 0, 4, 8, 12, m[q[0]], m[q[1]]);
+      g16(v, 1, 5, 9, 13, m[q[2]], m[q[3]]);
+      g16(v, 2, 6, 10, 14, m[q[4]], m[q[5]]);
+      g16(v, 3, 7, 11, 15, m[q[6]], m[q[7]]);
+      g16(v, 0, 5, 10, 15, m[q[8]], m[q[9]]);
+      g16(v, 1, 6, 11, 12, m[q[10]], m[q[11]]);
+      g16(v, 2, 7, 8, 13, m[q[12]], m[q[13]]);
+      g16(v, 3, 4, 9, 14, m[q[14]], m[q[15]]);
+    }
+    for (i = 0; i < 8; i++) h[i] = _mm512_xor_si512(v[i], v[i + 8]);
+  }
+  for (i = 0; i < 8; i++) t[i] = h[i];
+  for (i = 8; i < 16; i++) t[i] = _mm512_setzero_si512();
+  transpose16(t);   /* t[c]: chunk c's eight words, then zeros */
+  for (l = 0; l < 16; l++) _mm256_storeu_si256((__m256i *)(cv + 8 * l), _mm512_castsi512_si256(t[l]));
+}
+
+/* what this CPU and OS can do: 2 = AVX2, 3 = AVX-512F (and AVX2), 0 = neither */
+static int b3_x86_wide_level(void) {
+  unsigned a, b, c, d, lo, hi;
+  if (!__get_cpuid_count(1, 0, &a, &b, &c, &d)) return 0;
+  if (!(c & (1u << 27)) || !(c & (1u << 28))) return 0;            /* OSXSAVE, AVX */
+  __asm__ volatile(".byte 0x0f,0x01,0xd0" : "=a"(lo), "=d"(hi) : "c"(0));   /* xgetbv(0) */
+  if ((lo & 6) != 6) return 0;                                      /* the OS keeps XMM and YMM */
+  if (__get_cpuid_max(0, 0) < 7) return 0;
+  __get_cpuid_count(7, 0, &a, &b, &c, &d);
+  if (!(b & (1u << 5))) return 0;                                   /* AVX2 */
+  if ((b & (1u << 16)) && (lo & 0xE0) == 0xE0) return 3;            /* AVX-512F, opmask and ZMM state */
+  return 2;
+}
+#endif
+
+/* The widest path in use. pblake3_chunks_level(max) caps it for tests (0 = one chunk at a time, 1 = 4 at a
+   time, 2 = AVX2, 3 = AVX-512) and returns what the CPU can do; (-1) just asks. */
+static int b3_cap = 3, b3_detected = -1;
+static int b3_detect(void) {
+  if (b3_detected < 0) {
+    int lv = 0;
+#if defined(B3_SSE2) || defined(B3_NEON)
+    lv = 1;
+#endif
+#ifdef B3_X86WIDE
+    { int w = b3_x86_wide_level(); if (w > lv) lv = w; }
+#endif
+    b3_detected = lv;
+  }
+  return b3_detected;
+}
+int pblake3_chunks_level(int max) {
+  int d = b3_detect();
+  if (max >= 0) b3_cap = max;
+  return d;
+}
+
 /* n full chunks at in, the first numbered counter: their chaining values,
    8 words each, into cv */
 void pblake3_chunks(const uint8_t *in, intptr_t n, uint64_t counter, uint32_t *cv) {
   intptr_t k = 0;
+  int lv = b3_detect();
+  if (lv > b3_cap) lv = b3_cap;
+#ifdef B3_X86WIDE
+  if (lv >= 3) for (; k + 16 <= n; k += 16) b3chunk16(in + 1024 * k, counter + (uint64_t)k, cv + 8 * k);
+  if (lv >= 2) for (; k + 8 <= n; k += 8) b3chunk8(in + 1024 * k, counter + (uint64_t)k, cv + 8 * k);
+#endif
 #if defined(B3_SSE2) || defined(B3_NEON)
-  for (; k + 4 <= n; k += 4) b3chunk4(in + 1024 * k, counter + (uint64_t)k, cv + 8 * k);
+  if (lv >= 1) for (; k + 4 <= n; k += 4) b3chunk4(in + 1024 * k, counter + (uint64_t)k, cv + 8 * k);
 #endif
   for (; k < n; k++) b3chunk(in + 1024 * k, counter + (uint64_t)k, cv + 8 * k);
 }

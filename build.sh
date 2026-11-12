@@ -23,7 +23,7 @@ fi
 # the chunk routine (SSE2 / NEON where there is one) against the plain one, and how fast each is; not for cross builds
 if [ -z "$RUN" ]; then
   # shellcheck disable=SC2086
-  $CC $FLAGS "$@" -DB3_PLAIN -Dpblake3_chunks=pblake3_chunks_plain -c "$HERE/src/b3chunks.c" -o "$OUT/b3plain.o"
+  $CC $FLAGS "$@" -DB3_PLAIN -Dpblake3_chunks=pblake3_chunks_plain -Dpblake3_chunks_level=pblake3_chunks_level_plain -c "$HERE/src/b3chunks.c" -o "$OUT/b3plain.o"
   # shellcheck disable=SC2086
   $CC -O2 "$@" "$HERE/tests/chunks_diff.c" "$OUT/b3chunks.o" "$OUT/b3plain.o" -o "$OUT/chunks_diff$EXE"
   "$OUT/chunks_diff$EXE" | tr -d '\r' | tee "$OUT/diff.txt"
