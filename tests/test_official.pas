@@ -9,10 +9,11 @@ begin Inc(cells); if not ok then begin Inc(failures); Writeln('  FAIL ', what); 
 function Hex(const x: array of Byte): string; var i: Integer;
 begin Result := ''; for i := 0 to High(x) do Result := Result + LowerCase(IntToHex(x[i], 2)); end;
 const STEPS: array[0..5] of Integer = (0, 1, 64, 1000, 1024, 3000);
-var si: Integer; kat: TStringList; l: string; f: TStringArray; n, i, pass, step, p, k: Integer;
+const KEY = 'whats the Elvish word for friend'; CONTEXT = 'BLAKE3 2019-12-27 16:29:52 test vectors context';
+var si: Integer; ks, cs: AnsiString; kat: TStringList; l: string; f: TStringArray; n, i, pass, step, p, k: Integer;
     d: array of Byte; o: array[0..130] of Byte; h: TBlake3; chunks: TBlake3Chunks; a: array[0..15] of Byte;
 begin
-  cells := 0; failures := 0; chunks := Blake3Chunks;
+  cells := 0; failures := 0; ks := KEY; cs := CONTEXT; chunks := Blake3Chunks;
   kat := TStringList.Create; kat.LoadFromFile(ParamStr(1));
   for pass := 0 to 1 do begin
     if pass = 0 then Blake3Chunks := chunks else Blake3Chunks := nil;
@@ -23,18 +24,21 @@ begin
       for si := 0 to 5 do begin
         if si = 0 then step := n else step := STEPS[si];
         if step < 1 then Continue;
-        h.Init; p := 0;
+        if f[0] = 'hash' then h.Init
+        else if f[0] = 'keyed_hash' then h.InitKeyed(ks[1], 32)
+        else h.InitDeriveKey(cs[1], Length(cs));
+        p := 0;
         while p < n do begin k := step; if p + k > n then k := n - p; h.Update(d[p], k); Inc(p, k); end;
         h.FinalXof(o, 131);
-        Check(Hex(o) = f[2], Format('%d B in steps of %d (pass %d)', [n, step, pass]));
+        Check(Hex(o) = f[2], Format('%s %d B in steps of %d (pass %d)', [f[0], n, step, pass]));
       end;
       { Final = the first 16 bytes; a short XOF is a prefix }
-      h.Init; if n > 0 then h.Update(d[0], n);
+      if f[0] = 'hash' then h.Init else if f[0] = 'keyed_hash' then h.InitKeyed(ks[1], 32) else h.InitDeriveKey(cs[1], Length(cs)); if n > 0 then h.Update(d[0], n);
       a := h.Final; Check(Hex(a) = Copy(f[2], 1, 32), Format('Final of %d B', [n]));
       h.FinalXof(o, 100); Check(Hex(Slice(o, 100)) = Copy(f[2], 1, 200), Format('XOF 100 of %d B', [n]));
     end;
   end;
   Blake3Chunks := chunks;
   Writeln(cells, ' cells, ', failures, ' failures');
-  if (failures > 0) or (cells < 500) then Halt(1);
+  if (failures > 0) or (cells < 1500) then Halt(1);
 end.

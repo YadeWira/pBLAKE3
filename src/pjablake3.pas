@@ -31,10 +31,17 @@ type
     chunk: QWord;                         { the current chunk's number }
     stack: array[0..53] of array[0..7] of LongWord;   { 2^54 chunks are 2^64 bytes }
     depth: Integer;
+    kcv: array[0..7] of LongWord;         { the key: IV, or the key's words, or the context's hash }
+    bflags: LongWord;                     { KEYED_HASH, DERIVE_KEY_MATERIAL, or 0 }
     procedure FinishChunk;
     procedure PushCv(const c: TCvWords);
   public
     procedure Init;
+    { keyed hash (a MAC): key is 32 bytes }
+    procedure InitKeyed(const key; keyLen: SizeInt);
+    { derive_key: context is the application's context string (UTF-8), then the key material goes
+      through Update; FinalXof (32 bytes usually) is the derived key }
+    procedure InitDeriveKey(const context; contextLen: SizeInt);
     procedure Update(const data; len: SizeInt);
     function Final: THash16;
     { any length of output (BLAKE3's XOF); the first 16 bytes are Final's }
@@ -60,6 +67,9 @@ implementation
 const
   IV: array[0..7] of LongWord = ($6A09E667, $BB67AE85, $3C6EF372, $A54FF53A,
                                  $510E527F, $9B05688C, $1F83D9AB, $5BE0CD19);
+  KEYED_HASH = 16;
+  DERIVE_KEY_CONTEXT = 32;
+  DERIVE_KEY_MATERIAL = 64;
   CHUNK_START = 1;
   CHUNK_END = 2;
   PARENT = 4;
@@ -248,9 +258,35 @@ end;
 procedure TBlake3.Init;
 var i: Integer;
 begin
-  for i := 0 to 7 do cv[i] := IV[i];
+  for i := 0 to 7 do begin kcv[i] := IV[i]; cv[i] := IV[i]; end;
+  bflags := 0;
   FillChar(block, SizeOf(block), 0);
   blockLen := 0; blocksDone := 0; chunk := 0; depth := 0;
+end;
+
+procedure TBlake3.InitKeyed(const key; keyLen: SizeInt);
+var i: Integer; p: PByte;
+begin
+  if keyLen <> 32 then raise ERangeError.Create('InitKeyed: the key is 32 bytes');
+  Init; p := @key;
+  for i := 0 to 7 do begin
+    kcv[i] := LEtoN(PLongWord(p)[i]); cv[i] := kcv[i];
+  end;
+  bflags := KEYED_HASH;
+end;
+
+procedure TBlake3.InitDeriveKey(const context; contextLen: SizeInt);
+var h: TBlake3; k: array[0..31] of Byte; i: Integer;
+begin
+  if contextLen < 0 then raise ERangeError.Create('InitDeriveKey: negative length');
+  h.Init; h.bflags := DERIVE_KEY_CONTEXT;
+  if contextLen > 0 then h.Update(context, contextLen);
+  h.FinalXof(k, 32);
+  Init;
+  for i := 0 to 7 do begin
+    kcv[i] := LEtoN(PLongWord(@k[0])[i]); cv[i] := kcv[i];
+  end;
+  bflags := DERIVE_KEY_MATERIAL;
 end;
 
 { The current chunk is full and more input follows: its chaining value goes
@@ -259,11 +295,11 @@ procedure TBlake3.FinishChunk;
 var c: TCv; flags: LongWord; i: Integer;
 begin
   for i := 0 to 7 do c[i] := cv[i];
-  flags := CHUNK_END;
+  flags := CHUNK_END or bflags;
   if blocksDone = 0 then flags := flags or CHUNK_START;
   CompressCv(c, block, chunk, blockLen, flags);
   PushCv(TCvWords(c));
-  for i := 0 to 7 do cv[i] := IV[i];
+  for i := 0 to 7 do cv[i] := kcv[i];
   FillChar(block, SizeOf(block), 0);
   blockLen := 0; blocksDone := 0;
 end;
@@ -279,8 +315,8 @@ begin
   while total and 1 = 0 do begin
     Dec(depth);
     ParentBlock(TCv(stack[depth]), x, b);
-    for i := 0 to 7 do x[i] := IV[i];
-    CompressCv(x, b, 0, 64, PARENT);
+    for i := 0 to 7 do x[i] := kcv[i];
+    CompressCv(x, b, 0, 64, PARENT or bflags);
     total := total shr 1;
   end;
   for i := 0 to 7 do stack[depth][i] := x[i];
@@ -294,7 +330,7 @@ begin
   while len > 0 do begin
     { at a chunk's start with more than a chunk to come: whole chunks at
       once through Blake3Chunks, all but the input's last one }
-    if (blockLen = 0) and (blocksDone = 0) and (len > CHUNK_LEN) and Assigned(Blake3Chunks) then begin
+    if (blockLen = 0) and (blocksDone = 0) and (len > CHUNK_LEN) and Assigned(Blake3Chunks) and (bflags = 0) then begin
       k := (len - 1) div CHUNK_LEN;
       if k > Length(cvs) then k := Length(cvs);
       Blake3Chunks(p, k, chunk, @cvs[0][0]);
@@ -307,7 +343,7 @@ begin
     if blockLen = 64 then begin
       if blocksDone = CHUNK_LEN div 64 - 1 then FinishChunk
       else begin
-        if blocksDone = 0 then flags := CHUNK_START else flags := 0;
+        if blocksDone = 0 then flags := CHUNK_START or bflags else flags := bflags;
         CompressCv(TCv(cv), block, chunk, 64, flags);
         Inc(blocksDone);
         FillChar(block, SizeOf(block), 0);
@@ -330,7 +366,7 @@ begin
   for i := 0 to 7 do c[i] := cv[i];
   Move(block, blk, 64);
   counter := chunk; blen := blockLen;
-  flags := CHUNK_END;
+  flags := CHUNK_END or bflags;
   if blocksDone = 0 then flags := flags or CHUNK_START;
   dp := depth;   { local: the state is not consumed, Final and FinalXof can be called again }
   while dp > 0 do begin
@@ -339,8 +375,8 @@ begin
     for i := 0 to 7 do c[i] := s[i];
     Dec(dp);
     ParentBlock(TCv(stack[dp]), c, blk);
-    for i := 0 to 7 do c[i] := IV[i];
-    counter := 0; blen := 64; flags := PARENT;
+    for i := 0 to 7 do c[i] := kcv[i];
+    counter := 0; blen := 64; flags := PARENT or bflags;
   end;
   { the root node, compressed again for each 64 bytes of output, its counter the block's number }
   o := @outp; ob := 0;
