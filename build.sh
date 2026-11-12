@@ -47,5 +47,8 @@ if [ -z "$RUN" ]; then
   cat "$OUT/b3sum$EXE" "$OUT/b3sum$EXE" "$OUT/b3sum$EXE" "$OUT/b3sum$EXE" "$OUT/b3sum$EXE" > "$OUT/big.bin"
   one=$("$OUT/b3sum$EXE" --num-threads 1 "$OUT/big.bin" | tr -d '\r'); four=$("$OUT/b3sum$EXE" --num-threads 4 "$OUT/big.bin" | tr -d '\r')
   [ "$one" = "$four" ] || { echo "b3sum: 1 thread and 4 threads differ"; exit 1; }
+  $FPC -O3 -Fu"$HERE/src" -Fi"$HERE/src" -Fo"$OUT" -FU"$OUT" -o"$OUT/fuzz_split$EXE" "$HERE/tests/fuzz_split.pas" >"$OUT/fpc4.log" 2>&1 \
+    || { cat "$OUT/fpc4.log"; exit 1; }
+  "$OUT/fuzz_split$EXE" "${B3_FUZZ:-60}" | tr -d '\r' | tail -3 | tee "$OUT/fuzz.txt"; grep -q ' 0 failures' "$OUT/fuzz.txt"
   echo "b3sum: abc ok, 1 thread = 4 threads ($(wc -c < "$OUT/big.bin" | tr -d ' ') bytes)"
 fi
