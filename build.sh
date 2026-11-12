@@ -37,3 +37,15 @@ $FPC -O3 -Fu"$HERE/src" -Fi"$HERE/src" -Fo"$OUT" -FU"$OUT" -o"$OUT/test_official
   || { cat "$OUT/fpc2.log"; exit 1; }
 $RUN "$OUT/test_official$EXE" "$HERE/tests/official_hash.txt" | tr -d '\r' | tee "$OUT/off.txt" | tail -3
 grep -q ' 0 failures' "$OUT/off.txt"
+# the command line tool, on a few threads (not for the cross builds: no libc there for the threads)
+if [ -z "$RUN" ]; then
+  $FPC -O3 -Fu"$HERE/src" -Fi"$HERE/src" -Fo"$OUT" -FU"$OUT" -o"$OUT/b3sum$EXE" "$HERE/src/b3sum.pas" >"$OUT/fpc3.log" 2>&1 \
+    || { cat "$OUT/fpc3.log"; exit 1; }
+  got=$(printf abc | "$OUT/b3sum$EXE" --no-names | tr -d '\r')
+  [ "$got" = 6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85 ] || { echo "b3sum of abc: $got"; exit 1; }
+  # threads or not, the same hash (the tool's own file is big enough for the threads to engage after 256 KiB)
+  cat "$OUT/b3sum$EXE" "$OUT/b3sum$EXE" "$OUT/b3sum$EXE" "$OUT/b3sum$EXE" "$OUT/b3sum$EXE" > "$OUT/big.bin"
+  one=$("$OUT/b3sum$EXE" --num-threads 1 "$OUT/big.bin" | tr -d '\r'); four=$("$OUT/b3sum$EXE" --num-threads 4 "$OUT/big.bin" | tr -d '\r')
+  [ "$one" = "$four" ] || { echo "b3sum: 1 thread and 4 threads differ"; exit 1; }
+  echo "b3sum: abc ok, 1 thread = 4 threads ($(wc -c < "$OUT/big.bin" | tr -d ' ') bytes)"
+fi

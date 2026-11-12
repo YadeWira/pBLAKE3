@@ -46,6 +46,19 @@ type
     function Final: THash16;
     { any length of output (BLAKE3's XOF); the first 16 bytes are Final's }
     procedure FinalXof(out outp; outLen: SizeInt);
+    { for threads: true when the state is at a chunk's start in the plain hash mode, so that chaining
+      values computed elsewhere (Blake3ChunkCv / Blake3Chunks) can be taken in }
+    function CanTakeChunkCvs: Boolean;
+    { when more input is certain to follow, a chunk whose last block is waiting can be closed: this does it,
+      so that the state is at a chunk start (a block waits for its CHUNK_END only if it may be the last) }
+    procedure FlushPending;
+    function ChunkIndex: QWord;           { the number of the chunk that comes next }
+    { the chaining values (8 words each) of the next count whole chunks, which must not be the input's
+      last: more input has to follow, or the last chunk has to be given through Update }
+    procedure AddChunkCvs(const cvs; count: SizeInt);
+    { the same for count subtrees of 2^g chunks each (their chaining values, as Blake3SubtreeCvs makes them);
+      the state must be at a chunk start whose number is a multiple of 2^g }
+    procedure AddSubtreeCvs(const cvs; count: SizeInt; g: Integer);
   end;
 
 type
@@ -56,6 +69,11 @@ var
   { set by pjav7 (pjasysc.c, several chunks at once); nil: this unit's own
     compression function, chunk by chunk. The same hash either way }
   Blake3Chunks: TBlake3Chunks = nil;
+
+{ the chaining value of one whole chunk (1024 bytes at p), number counter, plain hash mode }
+procedure Blake3ChunkCv(p: PByte; counter: QWord; out cv: TCvWords);
+{ cvs holds 2^g chunk chaining values (8 words each); they are merged pairwise into the subtree's one, left in cvs[0..7] }
+procedure Blake3MergeCvs(cvs: PLongWord; g: Integer);
 
 function Blake3_128(const a: TBytes): THash16;
 { The hash of a[aFirst..aFirst+aLen) followed by b[bFirst..bFirst+bLen). }
@@ -328,17 +346,8 @@ var p: PByte; take, k, i: SizeInt; flags: LongWord; cvs: array[0..15] of TCvWord
 begin
   p := @data;
   while len > 0 do begin
-    { at a chunk's start with more than a chunk to come: whole chunks at
-      once through Blake3Chunks, all but the input's last one }
-    if (blockLen = 0) and (blocksDone = 0) and (len > CHUNK_LEN) and Assigned(Blake3Chunks) and (bflags = 0) then begin
-      k := (len - 1) div CHUNK_LEN;
-      if k > Length(cvs) then k := Length(cvs);
-      Blake3Chunks(p, k, chunk, @cvs[0][0]);
-      for i := 0 to k - 1 do PushCv(cvs[i]);
-      Inc(p, k * CHUNK_LEN); Dec(len, k * CHUNK_LEN);
-      Continue;
-    end;
-    { a full block is only compressed when more input follows: the last
+    { a full block is only compressed (here, at the top, so that a chunk's end left
+      pending by the previous call does not keep us off the fast path below) when more input follows: the last
       block of the last chunk has to wait for its CHUNK_END and ROOT }
     if blockLen = 64 then begin
       if blocksDone = CHUNK_LEN div 64 - 1 then FinishChunk
@@ -349,6 +358,16 @@ begin
         FillChar(block, SizeOf(block), 0);
         blockLen := 0;
       end;
+    end;
+    { at a chunk's start with more than a chunk to come: whole chunks at
+      once through Blake3Chunks, all but the input's last one }
+    if (blockLen = 0) and (blocksDone = 0) and (len > CHUNK_LEN) and Assigned(Blake3Chunks) and (bflags = 0) then begin
+      k := (len - 1) div CHUNK_LEN;
+      if k > Length(cvs) then k := Length(cvs);
+      Blake3Chunks(p, k, chunk, @cvs[0][0]);
+      for i := 0 to k - 1 do PushCv(cvs[i]);
+      Inc(p, k * CHUNK_LEN); Dec(len, k * CHUNK_LEN);
+      Continue;
     end;
     take := 64 - blockLen;
     if take > len then take := len;
@@ -389,6 +408,78 @@ begin
     k := 64; if k > outLen then k := outLen;
     Move(t, o^, k); Inc(o, k); Dec(outLen, k); Inc(ob);
   end;
+end;
+
+function TBlake3.CanTakeChunkCvs: Boolean;
+begin Result := (blockLen = 0) and (blocksDone = 0) and (bflags = 0); end;
+
+procedure TBlake3.FlushPending;
+begin
+  if (blockLen = 64) and (blocksDone = CHUNK_LEN div 64 - 1) then FinishChunk;
+end;
+
+function TBlake3.ChunkIndex: QWord;
+begin Result := chunk; end;
+
+procedure TBlake3.AddChunkCvs(const cvs; count: SizeInt);
+var p: PLongWord; i: SizeInt; c: TCvWords; j: Integer;
+begin
+  if (count < 0) or not CanTakeChunkCvs then raise ERangeError.Create('AddChunkCvs: not at a chunk start');
+  p := @cvs;
+  for i := 0 to count - 1 do begin
+    for j := 0 to 7 do c[j] := p[8 * i + j];
+    PushCv(c);
+  end;
+end;
+
+procedure TBlake3.AddSubtreeCvs(const cvs; count: SizeInt; g: Integer);
+var p: PLongWord; i: SizeInt; x: TCv; b: TWords16; total: QWord; j: Integer;
+begin
+  if (count < 0) or (g < 0) or (g > 40) or not CanTakeChunkCvs or (chunk and ((QWord(1) shl g) - 1) <> 0) then
+    raise ERangeError.Create('AddSubtreeCvs: not at a subtree start');
+  p := @cvs;
+  for i := 0 to count - 1 do begin
+    for j := 0 to 7 do x[j] := p[8 * i + j];
+    Inc(chunk, QWord(1) shl g);
+    total := chunk shr g;
+    while total and 1 = 0 do begin
+      Dec(depth);
+      ParentBlock(TCv(stack[depth]), x, b);
+      for j := 0 to 7 do x[j] := kcv[j];
+      CompressCv(x, b, 0, 64, PARENT or bflags);
+      total := total shr 1;
+    end;
+    for j := 0 to 7 do stack[depth][j] := x[j];
+    Inc(depth);
+  end;
+end;
+
+procedure Blake3MergeCvs(cvs: PLongWord; g: Integer);
+var lvl, n, i, j: Integer; x: TCv; b: TWords16;
+begin
+  n := 1 shl g;
+  for lvl := 1 to g do begin
+    n := n shr 1;
+    for i := 0 to n - 1 do begin
+      for j := 0 to 7 do begin b[j] := NtoLE(cvs[16 * i + j]); b[j + 8] := NtoLE(cvs[16 * i + 8 + j]); end;
+      for j := 0 to 7 do x[j] := IV[j];
+      CompressCv(x, b, 0, 64, PARENT);
+      for j := 0 to 7 do cvs[8 * i + j] := x[j];
+    end;
+  end;
+end;
+
+procedure Blake3ChunkCv(p: PByte; counter: QWord; out cv: TCvWords);
+var c: TCv; b: Integer; flags: LongWord; i: Integer;
+begin
+  for i := 0 to 7 do c[i] := IV[i];
+  for b := 0 to CHUNK_LEN div 64 - 1 do begin
+    flags := 0;
+    if b = 0 then flags := CHUNK_START;
+    if b = CHUNK_LEN div 64 - 1 then flags := flags or CHUNK_END;
+    CompressCv(c, p[64 * b], counter, 64, flags);
+  end;
+  for i := 0 to 7 do cv[i] := c[i];
 end;
 
 function TBlake3.Final: THash16;
