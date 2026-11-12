@@ -8,3 +8,5 @@ Hash only for now (BLAKE3-128 = first 16 bytes). Output must equal the official 
 - `tests/`: official vectors (`kat.txt`) checked on both paths. Run `./build.sh` (extra flags go to the C compiler, e.g. `-m32`).
 
 Unit/API names are kept as PJA uses them; changes are announced to PJA first.
+
+Big-endian: `scripts/fpc-ppc64be.sh` builds a PowerPC64 cross FreePascal (15 s) and CI runs the tests under qemu-ppc64; the shared library and C API are not tested on big-endian (no cross libc there).

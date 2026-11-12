@@ -3,7 +3,7 @@
 # The C object must not need libgcc (no 64-bit division, etc.): checked with nm -u.
 set -eu
 cd "$(dirname "$0")"; HERE=.; OUT=${B3_OUT:-build}   # relative paths: a native Windows fpc cannot read MSYS paths
-FPC=${FPC:-fpc}; CC=${CC:-cc}
+FPC=${FPC:-fpc}; CC=${CC:-cc}; NM=${NM:-nm}; RUN=${RUN:-}   # RUN: a prefix for the test programs (qemu-ppc64 ...)
 case $CC in /*) PATH=$(dirname "${CC%% *}"):$PATH; export PATH ;; esac
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) EXE=.exe ;; *) EXE= ;; esac
 rm -rf "$OUT"; mkdir -p "$OUT"
@@ -15,16 +15,16 @@ case "$CC $* $($CC -dumpmachine 2>/dev/null || true)" in
 esac
 # shellcheck disable=SC2086
 $CC $FLAGS "$@" -c "$HERE/src/b3chunks.c" -o "$OUT/b3chunks.o"
-if command -v nm >/dev/null; then
-  bad=$(nm -u "$OUT/b3chunks.o" | grep -E '__(u?div|u?mod|ctz|clz|popcount)[a-z]*[0-9]|___?chkstk|memcpy|memset' || true)
+if command -v "$NM" >/dev/null; then
+  bad=$($NM -u "$OUT/b3chunks.o" | grep -E '__(u?div|u?mod|ctz|clz|popcount)[a-z]*[0-9]|___?chkstk|memcpy|memset' || true)
   if [ -n "$bad" ]; then echo "b3chunks.o needs the runtime:"; echo "$bad"; exit 1; fi
-  echo "nm -u: b3chunks.o needs nothing"
+  echo "$NM -u: b3chunks.o needs nothing"
 fi
 $FPC -O3 -Fu"$HERE/src" -Fi"$HERE/src" -Fo"$OUT" -FU"$OUT" -o"$OUT/test_blake3$EXE" "$HERE/tests/test_blake3.pas" >"$OUT/fpc.log" 2>&1 \
   || { cat "$OUT/fpc.log"; exit 1; }
-"$OUT/test_blake3$EXE" "$HERE/tests/kat.txt" | tr -d '\r' | tail -3
-"$OUT/test_blake3$EXE" "$HERE/tests/kat.txt" | tr -d '\r' | grep -q ' 0 failures'
+$RUN "$OUT/test_blake3$EXE" "$HERE/tests/kat.txt" | tr -d '\r' | tail -3
+$RUN "$OUT/test_blake3$EXE" "$HERE/tests/kat.txt" | tr -d '\r' | grep -q ' 0 failures'
 $FPC -O3 -Fu"$HERE/src" -Fi"$HERE/src" -Fo"$OUT" -FU"$OUT" -o"$OUT/test_official$EXE" "$HERE/tests/test_official.pas" >"$OUT/fpc2.log" 2>&1 \
   || { cat "$OUT/fpc2.log"; exit 1; }
-"$OUT/test_official$EXE" "$HERE/tests/official_hash.txt" | tr -d '\r' | tee "$OUT/off.txt" | tail -3
+$RUN "$OUT/test_official$EXE" "$HERE/tests/official_hash.txt" | tr -d '\r' | tee "$OUT/off.txt" | tail -3
 grep -q ' 0 failures' "$OUT/off.txt"

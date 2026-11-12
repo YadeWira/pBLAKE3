@@ -30,6 +30,14 @@ jobs:
           sudo apt-get install -y libc6:i386 gcc-multilib clang
       - run: scripts/fpc-i386.sh /tmp/fpc-i386
       - run: FPC=/tmp/fpc-i386/fpc CC="clang -m32" sh build.sh && FPC=/tmp/fpc-i386/fpc CC="clang -m32" sh lib.sh
+  # big-endian: PowerPC64 under qemu-user, with a cross FreePascal built from the distribution's source
+  linux-ppc64-bigendian:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y fpc fpc-source clang llvm qemu-user binutils-powerpc64-linux-gnu
+      - run: scripts/fpc-ppc64be.sh /tmp/fpc-ppc64
+      - run: FPC=/tmp/fpc-ppc64/fpc CC="clang --target=powerpc64-linux-gnu" NM=llvm-nm RUN=qemu-ppc64 sh build.sh
   macos-arm64:
     runs-on: macos-latest
     steps:
