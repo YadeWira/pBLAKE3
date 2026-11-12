@@ -18,8 +18,8 @@ How that is kept honest, on every push (CI, 7 targets):
 
 Stable (a change needs a new major version and a notice to PJA first; additions are allowed in any release):
 - `pjablake3`: `TBlake3` with `Init`, `Update`, `Final`, `FinalXof`, `InitKeyed`, `InitDeriveKey`; `Blake3_128`
-  (both forms); `Blake3Chunks` and the `TBlake3Chunks` signature.
-- `src/b3chunks.c`: `pblake3_chunks(in, n, counter, cv)` (the hook's C side; it takes no memory and calls no library).
+  (both forms); `Blake3Chunks` and the `TBlake3Chunks` signature (and `Blake3ChunksKF`, its keyed twin).
+- `src/b3chunks.c`: `pblake3_chunks(in, n, counter, cv)` and `pblake3_chunks_kf(in, n, counter, key, flags, cv)` (the hooks' C side; it takes no memory and calls no library).
 - the C API of `include/pblake3.h` (`PBLAKE3_API_VERSION`; a function is never changed or removed inside a version).
 
 Not promised: the speed of any path, which SIMD level is used, the internals of `TBlake3`, the thread unit

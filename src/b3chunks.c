@@ -43,15 +43,15 @@ static inline void b3g(uint32_t *s, int a, int b, int c, int d, uint32_t x, uint
 }
 
 /* one chunk of 1024 bytes, number counter: its chaining value */
-static void b3chunk(const uint8_t *in, uint64_t counter, uint32_t *cv) {
+static void b3chunk(const uint8_t *in, uint64_t counter, const uint32_t *key, uint32_t fl, uint32_t *cv) {
   uint32_t h[8], s[16], m[16];
   int i, b, r;
-  for (i = 0; i < 8; i++) h[i] = B3IV[i];
+  for (i = 0; i < 8; i++) h[i] = key[i];
   for (b = 0; b < B3_BLOCKS; b++) {
     for (i = 0; i < 16; i++) m[i] = b3load(in + 64 * b + 4 * i);
     for (i = 0; i < 8; i++) { s[i] = h[i]; s[i + 8] = B3IV[i]; }
     s[12] = (uint32_t)counter; s[13] = (uint32_t)(counter >> 32); s[14] = 64;
-    s[15] = (b == 0 ? B3_CHUNK_START : 0) | (b == B3_BLOCKS - 1 ? B3_CHUNK_END : 0);
+    s[15] = fl | (b == 0 ? B3_CHUNK_START : 0) | (b == B3_BLOCKS - 1 ? B3_CHUNK_END : 0);
     for (r = 0; r < 7; r++) {
       const uint8_t *q = B3SCHED[r];
       b3g(s, 0, 4, 8, 12, m[q[0]], m[q[1]]);
@@ -85,14 +85,14 @@ static inline void transpose4(__m128i *a, __m128i *b, __m128i *c, __m128i *d) {
   *c = _mm_unpacklo_epi64(ab1, cd1); *d = _mm_unpackhi_epi64(ab1, cd1);
 }
 /* four consecutive chunks, numbers counter .. counter + 3 */
-static void b3chunk4(const uint8_t *in, uint64_t counter, uint32_t *cv) {
+static void b3chunk4(const uint8_t *in, uint64_t counter, const uint32_t *key, uint32_t fl, uint32_t *cv) {
   __m128i h[8], v[16], m[16];
   int i, b, r;
   uint64_t c0 = counter, c1 = counter + 1, c2 = counter + 2, c3 = counter + 3;
   __m128i lo = _mm_set_epi32((int)(uint32_t)c3, (int)(uint32_t)c2, (int)(uint32_t)c1, (int)(uint32_t)c0);
   __m128i hi = _mm_set_epi32((int)(uint32_t)(c3 >> 32), (int)(uint32_t)(c2 >> 32), (int)(uint32_t)(c1 >> 32),
                              (int)(uint32_t)(c0 >> 32));
-  for (i = 0; i < 8; i++) h[i] = _mm_set1_epi32((int)B3IV[i]);
+  for (i = 0; i < 8; i++) h[i] = _mm_set1_epi32((int)key[i]);
   for (b = 0; b < B3_BLOCKS; b++) {
     for (i = 0; i < 4; i++) {
       const uint8_t *p = in + 64 * b + 16 * i;
@@ -105,7 +105,7 @@ static void b3chunk4(const uint8_t *in, uint64_t counter, uint32_t *cv) {
     for (i = 0; i < 8; i++) v[i] = h[i];
     for (i = 0; i < 4; i++) v[i + 8] = _mm_set1_epi32((int)B3IV[i]);
     v[12] = lo; v[13] = hi; v[14] = _mm_set1_epi32(64);
-    v[15] = _mm_set1_epi32((b == 0 ? B3_CHUNK_START : 0) | (b == B3_BLOCKS - 1 ? B3_CHUNK_END : 0));
+    v[15] = _mm_set1_epi32(fl | (b == 0 ? B3_CHUNK_START : 0) | (b == B3_BLOCKS - 1 ? B3_CHUNK_END : 0));
     for (r = 0; r < 7; r++) {
       const uint8_t *q = B3SCHED[r];
       g4(v, 0, 4, 8, 12, m[q[0]], m[q[1]]);
@@ -147,14 +147,14 @@ static inline void transpose4n(uint32x4_t *a, uint32x4_t *b, uint32x4_t *c, uint
 }
 static inline uint32x4_t ld4n(const uint8_t *p) { return vreinterpretq_u32_u8(vld1q_u8(p)); }
 /* four consecutive chunks, numbers counter .. counter + 3 */
-static void b3chunk4(const uint8_t *in, uint64_t counter, uint32_t *cv) {
+static void b3chunk4(const uint8_t *in, uint64_t counter, const uint32_t *key, uint32_t fl, uint32_t *cv) {
   uint32x4_t h[8], v[16], m[16];
   int i, b, r;
   uint32_t lw[4], hw[4];
   uint32x4_t lo, hi;
   for (i = 0; i < 4; i++) { lw[i] = (uint32_t)(counter + (uint64_t)i); hw[i] = (uint32_t)((counter + (uint64_t)i) >> 32); }
   lo = vld1q_u32(lw); hi = vld1q_u32(hw);
-  for (i = 0; i < 8; i++) h[i] = vdupq_n_u32(B3IV[i]);
+  for (i = 0; i < 8; i++) h[i] = vdupq_n_u32(key[i]);
   for (b = 0; b < B3_BLOCKS; b++) {
     for (i = 0; i < 4; i++) {
       const uint8_t *p = in + 64 * b + 16 * i;
@@ -167,7 +167,7 @@ static void b3chunk4(const uint8_t *in, uint64_t counter, uint32_t *cv) {
     for (i = 0; i < 8; i++) v[i] = h[i];
     for (i = 0; i < 4; i++) v[i + 8] = vdupq_n_u32(B3IV[i]);
     v[12] = lo; v[13] = hi; v[14] = vdupq_n_u32(64);
-    v[15] = vdupq_n_u32((b == 0 ? B3_CHUNK_START : 0) | (b == B3_BLOCKS - 1 ? B3_CHUNK_END : 0));
+    v[15] = vdupq_n_u32(fl | (b == 0 ? B3_CHUNK_START : 0) | (b == B3_BLOCKS - 1 ? B3_CHUNK_END : 0));
     for (r = 0; r < 7; r++) {
       const uint8_t *q = B3SCHED[r];
       g4n(v, 0, 4, 8, 12, m[q[0]], m[q[1]]);
@@ -224,14 +224,14 @@ T_AVX2 static inline void transpose8(__m256i *r) {
   r[4] = _mm256_permute2x128_si256(u0, u4, 0x31); r[5] = _mm256_permute2x128_si256(u1, u5, 0x31);
   r[6] = _mm256_permute2x128_si256(u2, u6, 0x31); r[7] = _mm256_permute2x128_si256(u3, u7, 0x31);
 }
-T_AVX2 static void b3chunk8(const uint8_t *in, uint64_t counter, uint32_t *cv) {
+T_AVX2 static void b3chunk8(const uint8_t *in, uint64_t counter, const uint32_t *key, uint32_t fl, uint32_t *cv) {
   __m256i h[8], v[16], m[16], t[8];
   int i, b, r, l;
   uint32_t lw[8], hw[8];
   __m256i lo, hi;
   for (l = 0; l < 8; l++) { lw[l] = (uint32_t)(counter + (uint64_t)l); hw[l] = (uint32_t)((counter + (uint64_t)l) >> 32); }
   lo = _mm256_loadu_si256((const __m256i *)lw); hi = _mm256_loadu_si256((const __m256i *)hw);
-  for (i = 0; i < 8; i++) h[i] = _mm256_set1_epi32((int)B3IV[i]);
+  for (i = 0; i < 8; i++) h[i] = _mm256_set1_epi32((int)key[i]);
   for (b = 0; b < B3_BLOCKS; b++) {
     for (l = 0; l < 8; l++) t[l] = _mm256_loadu_si256((const __m256i *)(in + 1024 * l + 64 * b));
     transpose8(t); for (i = 0; i < 8; i++) m[i] = t[i];
@@ -240,7 +240,7 @@ T_AVX2 static void b3chunk8(const uint8_t *in, uint64_t counter, uint32_t *cv) {
     for (i = 0; i < 8; i++) v[i] = h[i];
     for (i = 0; i < 4; i++) v[i + 8] = _mm256_set1_epi32((int)B3IV[i]);
     v[12] = lo; v[13] = hi; v[14] = _mm256_set1_epi32(64);
-    v[15] = _mm256_set1_epi32((b == 0 ? B3_CHUNK_START : 0) | (b == B3_BLOCKS - 1 ? B3_CHUNK_END : 0));
+    v[15] = _mm256_set1_epi32(fl | (b == 0 ? B3_CHUNK_START : 0) | (b == B3_BLOCKS - 1 ? B3_CHUNK_END : 0));
     for (r = 0; r < 7; r++) {
       const uint8_t *q = B3SCHED[r];
       g8(v, 0, 4, 8, 12, m[q[0]], m[q[1]]);
@@ -281,21 +281,21 @@ T_AVX512 static inline void transpose16(__m512i *r) {
     r[k + 8] = _mm512_shuffle_i32x4(a0, b0, 0xDD); r[k + 12] = _mm512_shuffle_i32x4(a1, b1, 0xDD);
   }
 }
-T_AVX512 static void b3chunk16(const uint8_t *in, uint64_t counter, uint32_t *cv) {
+T_AVX512 static void b3chunk16(const uint8_t *in, uint64_t counter, const uint32_t *key, uint32_t fl, uint32_t *cv) {
   __m512i h[8], v[16], m[16], t[16];
   int i, b, r, l;
   uint32_t lw[16], hw[16];
   __m512i lo, hi;
   for (l = 0; l < 16; l++) { lw[l] = (uint32_t)(counter + (uint64_t)l); hw[l] = (uint32_t)((counter + (uint64_t)l) >> 32); }
   lo = _mm512_loadu_si512((const void *)lw); hi = _mm512_loadu_si512((const void *)hw);
-  for (i = 0; i < 8; i++) h[i] = _mm512_set1_epi32((int)B3IV[i]);
+  for (i = 0; i < 8; i++) h[i] = _mm512_set1_epi32((int)key[i]);
   for (b = 0; b < B3_BLOCKS; b++) {
     for (l = 0; l < 16; l++) t[l] = _mm512_loadu_si512((const void *)(in + 1024 * l + 64 * b));
     transpose16(t); for (i = 0; i < 16; i++) m[i] = t[i];
     for (i = 0; i < 8; i++) v[i] = h[i];
     for (i = 0; i < 4; i++) v[i + 8] = _mm512_set1_epi32((int)B3IV[i]);
     v[12] = lo; v[13] = hi; v[14] = _mm512_set1_epi32(64);
-    v[15] = _mm512_set1_epi32((b == 0 ? B3_CHUNK_START : 0) | (b == B3_BLOCKS - 1 ? B3_CHUNK_END : 0));
+    v[15] = _mm512_set1_epi32(fl | (b == 0 ? B3_CHUNK_START : 0) | (b == B3_BLOCKS - 1 ? B3_CHUNK_END : 0));
     for (r = 0; r < 7; r++) {
       const uint8_t *q = B3SCHED[r];
       g16(v, 0, 4, 8, 12, m[q[0]], m[q[1]]);
@@ -352,18 +352,24 @@ int pblake3_chunks_level(int max) {
   return d;
 }
 
-/* n full chunks at in, the first numbered counter: their chaining values,
-   8 words each, into cv */
-void pblake3_chunks(const uint8_t *in, intptr_t n, uint64_t counter, uint32_t *cv) {
+/* n full chunks at in, the first numbered counter: their chaining values, 8 words each, into cv. key (8 words)
+   is the starting chaining value and fl the mode flags OR-ed into every block's (0 and the IV: the plain hash;
+   KEYED_HASH = 16 with the key's words; DERIVE_KEY_MATERIAL = 64 with the context's hash) */
+void pblake3_chunks_kf(const uint8_t *in, intptr_t n, uint64_t counter, const uint32_t *key, uint32_t fl, uint32_t *cv) {
   intptr_t k = 0;
   int lv = b3_detect();
   if (lv > b3_cap) lv = b3_cap;
 #ifdef B3_X86WIDE
-  if (lv >= 3) for (; k + 16 <= n; k += 16) b3chunk16(in + 1024 * k, counter + (uint64_t)k, cv + 8 * k);
-  if (lv >= 2) for (; k + 8 <= n; k += 8) b3chunk8(in + 1024 * k, counter + (uint64_t)k, cv + 8 * k);
+  if (lv >= 3) for (; k + 16 <= n; k += 16) b3chunk16(in + 1024 * k, counter + (uint64_t)k, key, fl, cv + 8 * k);
+  if (lv >= 2) for (; k + 8 <= n; k += 8) b3chunk8(in + 1024 * k, counter + (uint64_t)k, key, fl, cv + 8 * k);
 #endif
 #if defined(B3_SSE2) || defined(B3_NEON)
-  if (lv >= 1) for (; k + 4 <= n; k += 4) b3chunk4(in + 1024 * k, counter + (uint64_t)k, cv + 8 * k);
+  if (lv >= 1) for (; k + 4 <= n; k += 4) b3chunk4(in + 1024 * k, counter + (uint64_t)k, key, fl, cv + 8 * k);
 #endif
-  for (; k < n; k++) b3chunk(in + 1024 * k, counter + (uint64_t)k, cv + 8 * k);
+  for (; k < n; k++) b3chunk(in + 1024 * k, counter + (uint64_t)k, key, fl, cv + 8 * k);
+}
+
+/* the plain hash's (what PJA's hook is) */
+void pblake3_chunks(const uint8_t *in, intptr_t n, uint64_t counter, uint32_t *cv) {
+  pblake3_chunks_kf(in, n, counter, B3IV, 0, cv);
 }

@@ -11,12 +11,12 @@ begin Result := ''; for i := 0 to High(x) do Result := Result + LowerCase(IntToH
 const STEPS: array[0..5] of Integer = (0, 1, 64, 1000, 1024, 3000);
 const KEY = 'whats the Elvish word for friend'; CONTEXT = 'BLAKE3 2019-12-27 16:29:52 test vectors context';
 var si: Integer; ks, cs: AnsiString; kat: TStringList; l: string; f: TStringArray; n, i, pass, step, p, k: Integer;
-    d: array of Byte; o: array[0..130] of Byte; h: TBlake3; chunks: TBlake3Chunks; a: array[0..15] of Byte;
+    d: array of Byte; o: array[0..130] of Byte; h: TBlake3; chunks: TBlake3Chunks; chunksKF: TBlake3ChunksKF; a: array[0..15] of Byte;
 begin
-  cells := 0; failures := 0; ks := KEY; cs := CONTEXT; chunks := Blake3Chunks;
+  cells := 0; failures := 0; ks := KEY; cs := CONTEXT; chunks := Blake3Chunks; chunksKF := Blake3ChunksKF;
   kat := TStringList.Create; kat.LoadFromFile(ParamStr(1));
   for pass := 0 to 1 do begin
-    if pass = 0 then Blake3Chunks := chunks else Blake3Chunks := nil;
+    if pass = 0 then begin Blake3Chunks := chunks; Blake3ChunksKF := chunksKF; end else begin Blake3Chunks := nil; Blake3ChunksKF := nil; end;
     for l in kat do begin
       if (l = '') or (l[1] = '#') then Continue;
       f := l.Split(' '); n := StrToInt(f[1]);
@@ -38,7 +38,7 @@ begin
       h.FinalXof(o, 100); Check(Hex(Slice(o, 100)) = Copy(f[2], 1, 200), Format('XOF 100 of %d B', [n]));
     end;
   end;
-  Blake3Chunks := chunks;
+  Blake3Chunks := chunks; Blake3ChunksKF := chunksKF;
   Writeln(cells, ' cells, ', failures, ' failures');
   if (failures > 0) or (cells < 1500) then Halt(1);
 end.

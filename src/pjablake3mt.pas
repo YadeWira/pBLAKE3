@@ -7,8 +7,7 @@ unit pjablake3mt;
 interface
 uses pjablake3;
 
-{ nChunks whole chunks at data, with more input to follow them. Plain mode is where threads help; any other
-  state just hashes serially. }
+{ nChunks whole chunks at data, with more input to follow them. Any mode (plain, keyed, derive_key). }
 procedure Blake3UpdateChunksMT(var h: TBlake3; const data; nChunks: SizeInt; threads: Integer);
 { any length (it keeps the last chunk for Update, so the tail is exact) }
 procedure Blake3UpdateMT(var h: TBlake3; const data; len: SizeInt; threads: Integer);
@@ -25,61 +24,57 @@ const
 
 { chunks [0, cnt) at pp, numbered from fst, cnt a multiple of 64: their 64-chunk subtrees' values into sb
   (cv is scratch, 8 words per chunk) }
-procedure ShareWork(pp: PByte; fst: QWord; cnt: SizeInt; cv, sb: PLongWord);
-var gi, j, i: SizeInt; c: TCvWords;
-begin
-  if Assigned(Blake3Chunks) then Blake3Chunks(pp, cnt, fst, cv)
-  else
-    for i := 0 to cnt - 1 do begin
-      Blake3ChunkCv(pp + i * CHUNK_BYTES, fst + QWord(i), c);
-      for j := 0 to 7 do cv[8 * i + j] := c[j];
-    end;
-  for gi := 0 to cnt div GROUP - 1 do begin
-    Blake3MergeCvs(cv + 8 * GROUP * gi, GROUP_LOG);
-    for j := 0 to 7 do sb[8 * gi + j] := cv[8 * GROUP * gi + j];
-  end;
-end;
-
-{ any number of chunks, their own values (no merging) }
-procedure ChunkWork(pp: PByte; fst: QWord; cnt: SizeInt; cv: PLongWord);
+{ chunks, in the state's mode: the SIMD hooks where there are, this unit's own compression otherwise }
+procedure ChunkWork(pp: PByte; fst: QWord; cnt: SizeInt; const key: TCvWords; flags: LongWord; cv: PLongWord);
 var j, i: SizeInt; c: TCvWords;
 begin
   if cnt <= 0 then Exit;
-  if Assigned(Blake3Chunks) then Blake3Chunks(pp, cnt, fst, cv)
+  if (flags = 0) and Assigned(Blake3Chunks) then Blake3Chunks(pp, cnt, fst, cv)
+  else if (flags <> 0) and Assigned(Blake3ChunksKF) then Blake3ChunksKF(pp, cnt, fst, @key[0], flags, cv)
   else
     for i := 0 to cnt - 1 do begin
-      Blake3ChunkCv(pp + i * CHUNK_BYTES, fst + QWord(i), c);
+      Blake3ChunkCv(pp + i * CHUNK_BYTES, fst + QWord(i), key, flags, c);
       for j := 0 to 7 do cv[8 * i + j] := c[j];
     end;
+end;
+
+procedure ShareWork(pp: PByte; fst: QWord; cnt: SizeInt; const key: TCvWords; flags: LongWord; cv, sb: PLongWord);
+var gi, j: SizeInt;
+begin
+  ChunkWork(pp, fst, cnt, key, flags, cv);
+  for gi := 0 to cnt div GROUP - 1 do begin
+    Blake3MergeCvs(cv + 8 * GROUP * gi, GROUP_LOG, key, flags);
+    for j := 0 to 7 do sb[8 * gi + j] := cv[8 * GROUP * gi + j];
+  end;
 end;
 
 type
   TWorker = class(TThread)
   private
-    p: PByte; first: QWord; count: SizeInt; cv, sb: PLongWord; done: PRTLEvent;
+    p: PByte; first: QWord; count: SizeInt; cv, sb: PLongWord; done: PRTLEvent; key: TCvWords; flags: LongWord;
   protected
     procedure Execute; override;
   public
-    constructor Make(ap: PByte; afirst: QWord; acount: SizeInt; acv, asb: PLongWord; adone: PRTLEvent);
+    constructor Make(ap: PByte; afirst: QWord; acount: SizeInt; acv, asb: PLongWord; adone: PRTLEvent; const akey: TCvWords; aflags: LongWord);
   end;
 
 { The workers are not joined with TThread.WaitFor (FPC's takes ~100 ms per thread on Unix): each one signals
   an event when it is done, and frees itself. }
-constructor TWorker.Make(ap: PByte; afirst: QWord; acount: SizeInt; acv, asb: PLongWord; adone: PRTLEvent);
+constructor TWorker.Make(ap: PByte; afirst: QWord; acount: SizeInt; acv, asb: PLongWord; adone: PRTLEvent; const akey: TCvWords; aflags: LongWord);
 begin
-  inherited Create(True); p := ap; first := afirst; count := acount; cv := acv; sb := asb; done := adone;
+  inherited Create(True); p := ap; first := afirst; count := acount; cv := acv; sb := asb; done := adone; key := akey; flags := aflags;
   FreeOnTerminate := True;
 end;
 
 procedure TWorker.Execute;
-begin ShareWork(p, first, count, cv, sb); RTLEventSetEvent(done); end;
+begin ShareWork(p, first, count, key, flags, cv, sb); RTLEventSetEvent(done); end;
 
 function Blake3Cpus: Integer;
 begin Result := TThread.ProcessorCount; if Result < 1 then Result := 1; end;
 
 procedure Blake3UpdateChunksMT(var h: TBlake3; const data; nChunks: SizeInt; threads: Integer);
 var p: PByte; n, per, k, i, t, groups, lone, mis: SizeInt; cvs, sub: array of LongWord; ev: array of PRTLEvent;
-    first: QWord; wk: TWorker;
+    first: QWord; wk: TWorker; key: TCvWords; flags: LongWord;
 begin
   if nChunks <= 0 then Exit;
   p := @data;
@@ -88,6 +83,7 @@ begin
     h.Update(p^, nChunks * CHUNK_BYTES); Exit;
   end;
   if threads > 64 then threads := 64;
+  h.GetMode(key, flags);
   { to a multiple of 64 chunks first, so that the groups are subtrees of the whole tree }
   mis := SizeInt(h.ChunkIndex and (GROUP - 1));
   if mis <> 0 then begin
@@ -110,17 +106,17 @@ begin
         t := per; if k + t > groups then t := groups - k;
         ev[i] := RTLEventCreate;
         wk := TWorker.Make(p + k * GROUP * CHUNK_BYTES, first + QWord(k * GROUP), t * GROUP,
-                           @cvs[8 * k * GROUP], @sub[8 * k], ev[i]);
+                           @cvs[8 * k * GROUP], @sub[8 * k], ev[i], key, flags);
         wk.Start;
         k := k + t;
       end;
       t := per; if t > groups then t := groups;
-      ShareWork(p, first, t * GROUP, @cvs[0], @sub[0]);
+      ShareWork(p, first, t * GROUP, key, flags, @cvs[0], @sub[0]);
       for i := 1 to threads - 1 do if ev[i] <> nil then begin RTLEventWaitFor(ev[i]); RTLEventDestroy(ev[i]); ev[i] := nil; end;
       h.AddSubtreeCvs(sub[0], groups, GROUP_LOG);
     end;
     if lone > 0 then begin
-      ChunkWork(p + groups * GROUP * CHUNK_BYTES, first + QWord(groups * GROUP), lone, @cvs[0]);
+      ChunkWork(p + groups * GROUP * CHUNK_BYTES, first + QWord(groups * GROUP), lone, key, flags, @cvs[0]);
       h.AddChunkCvs(cvs[0], lone);
     end;
     Inc(p, n * CHUNK_BYTES); Dec(nChunks, n);

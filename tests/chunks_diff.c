@@ -8,6 +8,8 @@
 #include <time.h>
 void pblake3_chunks(const uint8_t *in, intptr_t n, uint64_t counter, uint32_t *cv);
 int pblake3_chunks_level(int max);
+void pblake3_chunks_kf(const uint8_t *in, intptr_t n, uint64_t counter, const uint32_t *key, uint32_t fl, uint32_t *cv);
+void pblake3_chunks_kf_plain(const uint8_t *in, intptr_t n, uint64_t counter, const uint32_t *key, uint32_t fl, uint32_t *cv);
 void pblake3_chunks_plain(const uint8_t *in, intptr_t n, uint64_t counter, uint32_t *cv);
 #define MAXN 40
 static double bench(void (*f)(const uint8_t *, intptr_t, uint64_t, uint32_t *), const uint8_t *d, intptr_t n) {
@@ -35,6 +37,15 @@ int main(void) {
       pblake3_chunks(buf + off, n, ctrs[t], a); pblake3_chunks_plain(buf + off, n, ctrs[t], b);
       runs++;
       if (memcmp(a, b, sizeof a)) { bad++; printf("DIFF level %d n=%d counter=%llx\n", lv, n, (unsigned long long)ctrs[t]); }
+    }
+    /* a key and the keyed / derive_key flags */
+    for (n = 1; n <= MAXN; n += 3) for (t = 0; t < 4; t++) {
+      uint32_t key[8], fl = (t & 1) ? 16u : 64u; int q;
+      for (q = 0; q < 8; q++) { x ^= x << 13; x ^= x >> 17; x ^= x << 5; key[q] = x; }
+      memset(a, 0xAA, sizeof a); memset(b, 0xAA, sizeof b);
+      pblake3_chunks_kf(buf + t, n, ctrs[t], key, fl, a); pblake3_chunks_kf_plain(buf + t, n, ctrs[t], key, fl, b);
+      runs++;
+      if (memcmp(a, b, sizeof a)) { bad++; printf("DIFF level %d keyed n=%d flags=%u\n", lv, n, fl); }
     }
     printf("level %d, %s: %s, %.0f MB/s\n", lv, names[lv], bad == before ? "same as plain" : "DIFFERENT", bench(pblake3_chunks, d, big));
   }

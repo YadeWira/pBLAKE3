@@ -20,6 +20,6 @@ tested on big-endian).
 Speed, chunk computation on GitHub runners (MB/s, one thread): plain C 0.5-1.0k; SSE2/NEON 1.4-1.7k; AVX2 3.0-3.4k;
 AVX-512 5.9k. `b3sum` on 16 threads: about 3 GB/s here (the official one, with mmap, is faster).
 
-Keyed hash and derive_key use the Pascal path (no SIMD yet).
+Keyed hash and derive_key use the same SIMD paths and threads as the plain hash.
 
 MIT, see LICENSE and NOTICE (BLAKE3 is by Jack O'Connor, Jean-Philippe Aumasson, Samuel Neves and Zooko Wilcox-O'Hearn).

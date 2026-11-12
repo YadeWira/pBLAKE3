@@ -15,7 +15,7 @@ for n in 0 1 63 64 65 1023 1024 1025 2047 2048 2049 65536 262143 262144 262145 1
     got=$($OURS --num-threads $th "$f" | cut -d' ' -f1); same "$want" "$got" "plain $n B, $th threads"
   done
   want=$($OFF -l 200 --no-names "$f"); got=$($OURS -l 200 --no-names "$f"); same "$want" "$got" "xof 200, $n B"
-  if [ "$n" -le 8389633 ]; then
+  if true; then
     want=$($OFF --keyed --no-names "$f" < "$T/key"); got=$($OURS --keyed --no-names "$f" < "$T/key"); same "$want" "$got" "keyed $n B"
     want=$($OFF --derive-key "pBLAKE3 test context" --no-names "$f"); got=$($OURS --derive-key "pBLAKE3 test context" --no-names "$f")
     same "$want" "$got" "derive_key $n B"
