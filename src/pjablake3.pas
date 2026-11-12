@@ -37,6 +37,8 @@ type
     procedure Init;
     procedure Update(const data; len: SizeInt);
     function Final: THash16;
+    { any length of output (BLAKE3's XOF); the first 16 bytes are Final's }
+    procedure FinalXof(out outp; outLen: SizeInt);
   end;
 
 type
@@ -319,29 +321,43 @@ begin
   end;
 end;
 
-function TBlake3.Final: THash16;
-var c: TCv; blk: TWords16; counter: QWord; blen, flags: LongWord; s: TWords16; i: Integer;
+procedure TBlake3.FinalXof(out outp; outLen: SizeInt);
+var c: TCv; blk: TWords16; counter, ob: QWord; blen, flags: LongWord; s: TWords16; i: Integer;
+    o: PByte; k: SizeInt; dp: Integer; t: array[0..63] of Byte;
 begin
+  if outLen < 0 then raise ERangeError.Create('FinalXof: negative length');
   { the output node: the last chunk's last block, unless there are parents }
   for i := 0 to 7 do c[i] := cv[i];
   Move(block, blk, 64);
   counter := chunk; blen := blockLen;
   flags := CHUNK_END;
   if blocksDone = 0 then flags := flags or CHUNK_START;
-  while depth > 0 do begin
+  dp := depth;   { local: the state is not consumed, Final and FinalXof can be called again }
+  while dp > 0 do begin
     { this node becomes the right child of the one below it on the stack }
     Compress(c, blk, counter, blen, flags, s);
     for i := 0 to 7 do c[i] := s[i];
-    Dec(depth);
-    ParentBlock(TCv(stack[depth]), c, blk);
+    Dec(dp);
+    ParentBlock(TCv(stack[dp]), c, blk);
     for i := 0 to 7 do c[i] := IV[i];
     counter := 0; blen := 64; flags := PARENT;
   end;
-  Compress(c, blk, counter, blen, flags or ROOT, s);
-  for i := 0 to 3 do begin
-    Result[4 * i] := Byte(s[i]); Result[4 * i + 1] := Byte(s[i] shr 8);
-    Result[4 * i + 2] := Byte(s[i] shr 16); Result[4 * i + 3] := Byte(s[i] shr 24);
+  { the root node, compressed again for each 64 bytes of output, its counter the block's number }
+  o := @outp; ob := 0;
+  while outLen > 0 do begin
+    Compress(c, blk, ob, blen, flags or ROOT, s);
+    for i := 0 to 15 do begin
+      t[4 * i] := Byte(s[i]); t[4 * i + 1] := Byte(s[i] shr 8);
+      t[4 * i + 2] := Byte(s[i] shr 16); t[4 * i + 3] := Byte(s[i] shr 24);
+    end;
+    k := 64; if k > outLen then k := outLen;
+    Move(t, o^, k); Inc(o, k); Dec(outLen, k); Inc(ob);
   end;
+end;
+
+function TBlake3.Final: THash16;
+begin
+  FinalXof(Result, SizeOf(Result));
 end;
 
 function Blake3_128(const a: TBytes): THash16;

@@ -24,3 +24,7 @@ $FPC -O3 -Fu"$HERE/src" -Fi"$HERE/src" -Fo"$OUT" -FU"$OUT" -o"$OUT/test_blake3$E
   || { cat "$OUT/fpc.log"; exit 1; }
 "$OUT/test_blake3$EXE" "$HERE/tests/kat.txt" | tr -d '\r' | tail -3
 "$OUT/test_blake3$EXE" "$HERE/tests/kat.txt" | tr -d '\r' | grep -q ' 0 failures'
+$FPC -O3 -Fu"$HERE/src" -Fi"$HERE/src" -Fo"$OUT" -FU"$OUT" -o"$OUT/test_official$EXE" "$HERE/tests/test_official.pas" >"$OUT/fpc2.log" 2>&1 \
+  || { cat "$OUT/fpc2.log"; exit 1; }
+"$OUT/test_official$EXE" "$HERE/tests/official_hash.txt" | tr -d '\r' | tee "$OUT/off.txt" | tail -3
+grep -q ' 0 failures' "$OUT/off.txt"
