@@ -9,7 +9,7 @@ same() { cells=$((cells+1)); if [ "$1" != "$2" ]; then fails=$((fails+1)); echo 
 head -c 32 /dev/urandom > "$T/key"
 for n in 0 1 63 64 65 1023 1024 1025 2047 2048 2049 65536 262143 262144 262145 1048575 1048576 4194305 8388607 8388608 8388609 \
          8389631 8389632 8389633 12582912 16777216 16778240 16778241 25165824 33554432 33555457 40000001; do
-  f=$T/f$n; head -c $n /dev/urandom > "$f"
+  f=$T/f$n; if [ "$n" -eq 0 ]; then : > "$f"; else head -c $n /dev/urandom > "$f"; fi
   want=$($OFF "$f" | cut -d' ' -f1)
   for th in 1 2 3 7; do
     got=$($OURS --num-threads $th "$f" | cut -d' ' -f1); same "$want" "$got" "plain $n B, $th threads"
