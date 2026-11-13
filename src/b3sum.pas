@@ -22,7 +22,13 @@ begin Result := SysErrorMessage(code) + ' (os error ' + IntToStr(code) + ')'; en
 function ReadFd(h: THandle; var buf; n: SizeInt): SizeInt;
 begin
   Result := FileRead(h, buf, n);
-  if Result < 0 then raise Exception.Create(OsMsg(GetLastOSError));
+  if Result < 0 then begin
+    {$ifdef windows}
+    { the writer of a pipe closed it: that is the end of the input on Windows (ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF) }
+    if (GetLastOSError = 109) or (GetLastOSError = 38) then begin Result := 0; Exit; end;
+    {$endif}
+    raise Exception.Create(OsMsg(GetLastOSError));
+  end;
 end;
 
 function Hex(const x: array of Byte; n: SizeInt): string; var i: SizeInt;
