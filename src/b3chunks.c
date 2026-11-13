@@ -7,12 +7,17 @@
 #include <stdint.h>
 /* AVX2 and AVX-512 are compiled whatever the baseline is (target attributes) and used only
    where cpuid and xgetbv say the CPU and the OS support them */
-#if (defined(__x86_64__) || defined(__i386__)) && defined(__GNUC__) && !defined(B3_PLAIN) && !defined(B3_NO_AVX)
+#if (defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86)) && \
+    (defined(__GNUC__) || defined(_MSC_VER)) && !defined(B3_PLAIN) && !defined(B3_NO_AVX)
 #include <immintrin.h>
+#ifdef _MSC_VER
+#include <intrin.h>       /* MSVC: the intrinsics need no target attribute */
+#else
 #include <cpuid.h>
+#endif
 #define B3_X86WIDE 1
 #endif
-#if defined(__SSE2__) && !defined(B3_PLAIN)
+#if (defined(__SSE2__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 2)) && !defined(B3_PLAIN)
 #include <emmintrin.h>
 #define B3_SSE2 1
 #elif defined(__aarch64__) && defined(__ARM_NEON) && !defined(B3_PLAIN) && \
@@ -192,8 +197,13 @@ static void b3chunk4(const uint8_t *in, uint64_t counter, const uint32_t *key, u
 
 
 #ifdef B3_X86WIDE
+#ifdef _MSC_VER
+#define T_AVX2
+#define T_AVX512
+#else
 #define T_AVX2 __attribute__((target("avx2")))
 #define T_AVX512 __attribute__((target("avx512f,avx2")))
+#endif
 
 /* ---- AVX2: eight chunks at once ---- */
 #define ROT8V(x, c) _mm256_or_si256(_mm256_srli_epi32((x), (c)), _mm256_slli_epi32((x), 32 - (c)))
@@ -317,6 +327,15 @@ T_AVX512 static void b3chunk16(const uint8_t *in, uint64_t counter, const uint32
 
 /* what this CPU and OS can do: 2 = AVX2, 3 = AVX-512F (and AVX2), 0 = neither */
 static int b3_x86_wide_level(void) {
+#ifdef _MSC_VER
+  int r[4]; unsigned b, c, lo;
+  __cpuid(r, 0); if (r[0] < 7) return 0;
+  __cpuid(r, 1); c = (unsigned)r[2];
+  if (!(c & (1u << 27)) || !(c & (1u << 28))) return 0;            /* OSXSAVE, AVX */
+  lo = (unsigned)_xgetbv(0);
+  if ((lo & 6) != 6) return 0;                                      /* the OS keeps XMM and YMM */
+  __cpuidex(r, 7, 0); b = (unsigned)r[1];
+#else
   unsigned a, b, c, d, lo, hi;
   if (!__get_cpuid_count(1, 0, &a, &b, &c, &d)) return 0;
   if (!(c & (1u << 27)) || !(c & (1u << 28))) return 0;            /* OSXSAVE, AVX */
@@ -324,6 +343,7 @@ static int b3_x86_wide_level(void) {
   if ((lo & 6) != 6) return 0;                                      /* the OS keeps XMM and YMM */
   if (__get_cpuid_max(0, 0) < 7) return 0;
   __get_cpuid_count(7, 0, &a, &b, &c, &d);
+#endif
   if (!(b & (1u << 5))) return 0;                                   /* AVX2 */
   if ((b & (1u << 16)) && (lo & 0xE0) == 0xE0) return 3;            /* AVX-512F, opmask and ZMM state */
   return 2;
@@ -332,9 +352,22 @@ static int b3_x86_wide_level(void) {
 
 /* The widest path in use. pblake3_chunks_level(max) caps it for tests (0 = one chunk at a time, 1 = 4 at a
    time, 2 = AVX2, 3 = AVX-512) and returns what the CPU can do; (-1) just asks. */
+/* Detected once, by whichever thread comes first; two threads may both do it and store the same value. The variables are
+   read and written with relaxed atomics so that this is not a data race (ThreadSanitizer: tests/tsan_threads.c). */
+#if defined(__GNUC__)
+#define B3_LOAD(v) __atomic_load_n(&(v), __ATOMIC_RELAXED)
+#define B3_STORE(v, x) __atomic_store_n(&(v), (x), __ATOMIC_RELAXED)
+#elif defined(_MSC_VER)
+#define B3_LOAD(v) (*(volatile int *)&(v))
+#define B3_STORE(v, x) _InterlockedExchange((volatile long *)&(v), (long)(x))
+#else
+#define B3_LOAD(v) (v)
+#define B3_STORE(v, x) ((v) = (x))
+#endif
 static int b3_cap = 3, b3_detected = -1;
 static int b3_detect(void) {
-  if (b3_detected < 0) {
+  int d = B3_LOAD(b3_detected);
+  if (d < 0) {
     int lv = 0;
 #if defined(B3_SSE2) || defined(B3_NEON)
     lv = 1;
@@ -342,13 +375,14 @@ static int b3_detect(void) {
 #ifdef B3_X86WIDE
     { int w = b3_x86_wide_level(); if (w > lv) lv = w; }
 #endif
-    b3_detected = lv;
+    B3_STORE(b3_detected, lv);
+    d = lv;
   }
-  return b3_detected;
+  return d;
 }
 int pblake3_chunks_level(int max) {
   int d = b3_detect();
-  if (max >= 0) b3_cap = max;
+  if (max >= 0) B3_STORE(b3_cap, max);
   return d;
 }
 
@@ -358,7 +392,7 @@ int pblake3_chunks_level(int max) {
 void pblake3_chunks_kf(const uint8_t *in, intptr_t n, uint64_t counter, const uint32_t *key, uint32_t fl, uint32_t *cv) {
   intptr_t k = 0;
   int lv = b3_detect();
-  if (lv > b3_cap) lv = b3_cap;
+  { int cap = B3_LOAD(b3_cap); if (lv > cap) lv = cap; }
 #ifdef B3_X86WIDE
   if (lv >= 3) for (; k + 16 <= n; k += 16) b3chunk16(in + 1024 * k, counter + (uint64_t)k, key, fl, cv + 8 * k);
   if (lv >= 2) for (; k + 8 <= n; k += 8) b3chunk8(in + 1024 * k, counter + (uint64_t)k, key, fl, cv + 8 * k);

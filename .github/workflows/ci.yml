@@ -27,6 +27,29 @@ jobs:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y clang llvm qemu-user binutils-powerpc64-linux-gnu binutils-s390x-linux-gnu gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf libc6-dev-arm64-cross libc6-dev-armhf-cross
       - run: REQUIRE_ALL=1 sh tests/qemu_c_core.sh
+  # the plain C implementation with Microsoft's compiler (what a 7-Zip plugin is often built with)
+  msvc:
+    strategy:
+      matrix:
+        arch: [x64, x86]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+      - shell: cmd
+        run: |
+          mkdir build
+          cl /nologo /O2 /W3 /LD /DPBLAKE3_BUILD_DLL src\pblake3.c /Fe:build\pblake3m.dll /Fo:build\ || exit /b 1
+          cl /nologo /O2 /W3 tests\api_test.c /Fe:build\api_test_m.exe /Fo:build\ || exit /b 1
+          build\api_test_m.exe build\pblake3m.dll tests\official_hash.txt || exit /b 1
+          cl /nologo /O2 /W3 /D_CRT_SECURE_NO_WARNINGS tests\static_test.c /Fe:build\static_test_m.exe /Fo:build\ || exit /b 1
+          build\static_test_m.exe tests\official_hash.txt || exit /b 1
+          cl /nologo /O2 /W3 /c src\b3chunks.c /Fo:build\bc.obj || exit /b 1
+          cl /nologo /O2 /W3 /c /DB3_PLAIN /Dpblake3_chunks=pblake3_chunks_plain /Dpblake3_chunks_level=pblake3_chunks_level_plain /Dpblake3_chunks_kf=pblake3_chunks_kf_plain src\b3chunks.c /Fo:build\bp.obj || exit /b 1
+          cl /nologo /O2 /W3 tests\chunks_diff.c build\bc.obj build\bp.obj /Fe:build\chunks_diff_m.exe /Fo:build\ || exit /b 1
+          build\chunks_diff_m.exe || exit /b 1
   linux-arm64:
     runs-on: ubuntu-24.04-arm
     steps:
