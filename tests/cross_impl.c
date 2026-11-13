@@ -59,6 +59,7 @@ int main(int argc, char **argv) {
     if (memcmp(o1, o2, 400) || memcmp(o1, o3, 400) || memcmp(o1, o4, 400)) { fails++; printf("DIFF iter %d: %ld B mode %d out %ld\n", it, n, mode, (long)ol); }
     free(d);
   }
+  free(s1); free(s2); free(o1); free(o2); free(o3); free(o4);
   printf("%d iterations, %d failures\n", iters, fails);
   return fails != 0;
 }

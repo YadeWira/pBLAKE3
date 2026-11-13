@@ -16,6 +16,17 @@ jobs:
       - run: CC=clang sh build.sh && CC=clang sh lib.sh && CC=clang sh lib_c.sh
       - name: b3sum against the official one (cargo install b3sum)
         run: cargo install b3sum --locked && B3OFF=$HOME/.cargo/bin/b3sum sh tests/diff_b3sum.sh
+      - name: both libraries against the official Python binding (every size 0..20000, boundaries, XOF, pieces)
+        run: pip install blake3 && python3 tests/py_diff.py build/libpblake3.so build/libpblake3c.so --max 20000 --random 300
+      - name: the C code under AddressSanitizer and UBSan
+        run: CC=gcc sh tests/sanitize.sh && CC=clang sh tests/sanitize.sh
+  # the plain C core on other CPUs under qemu-user: aarch64 and ARM 32-bit (cross libc), big-endian powerpc64 and s390x (no libc)
+  qemu-c-core:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y clang llvm qemu-user binutils-powerpc64-linux-gnu binutils-s390x-linux-gnu gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf libc6-dev-arm64-cross libc6-dev-armhf-cross
+      - run: REQUIRE_ALL=1 sh tests/qemu_c_core.sh
   linux-arm64:
     runs-on: ubuntu-24.04-arm
     steps:
