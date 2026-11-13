@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y fpc clang
-      - run: CC=clang sh build.sh && CC=clang sh lib.sh
+      - run: CC=clang sh build.sh && CC=clang sh lib.sh && CC=clang sh lib_c.sh
       - name: b3sum against the official one (cargo install b3sum)
         run: cargo install b3sum --locked && B3OFF=$HOME/.cargo/bin/b3sum sh tests/diff_b3sum.sh
   linux-arm64:
@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y fpc clang
-      - run: CC=clang sh build.sh && CC=clang sh lib.sh
+      - run: CC=clang sh build.sh && CC=clang sh lib.sh && CC=clang sh lib_c.sh
       - name: b3sum against the official one (cargo install b3sum)
         run: cargo install b3sum --locked && B3OFF=$HOME/.cargo/bin/b3sum sh tests/diff_b3sum.sh
   linux-x86:
@@ -33,7 +33,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libc6:i386 gcc-multilib clang
       - run: scripts/fpc-i386.sh /tmp/fpc-i386
-      - run: FPC=/tmp/fpc-i386/fpc CC="clang -m32" sh build.sh && FPC=/tmp/fpc-i386/fpc CC="clang -m32" sh lib.sh
+      - run: FPC=/tmp/fpc-i386/fpc CC="clang -m32" sh build.sh && FPC=/tmp/fpc-i386/fpc CC="clang -m32" sh lib.sh && CC="clang -m32" sh lib_c.sh
   # big-endian: PowerPC64 under qemu-user, with a cross FreePascal built from the distribution's source
   linux-ppc64-bigendian:
     runs-on: ubuntu-24.04
@@ -47,7 +47,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: brew install fpc
-      - run: sh build.sh && sh lib.sh
+      - run: sh build.sh && sh lib.sh && sh lib_c.sh
       - name: b3sum against the official one (cargo install b3sum)
         run: cargo install b3sum --locked && B3OFF=$HOME/.cargo/bin/b3sum sh tests/diff_b3sum.sh
   windows-x64:
@@ -69,7 +69,7 @@ jobs:
         env:
           FPC: fpc -Px86_64
           CC: /c/msys64/mingw64/bin/clang
-        run: sh build.sh && sh lib.sh
+        run: sh build.sh && sh lib.sh && sh lib_c.sh
       - name: b3sum against the official one (cargo install b3sum)
         shell: bash
         run: cargo install b3sum --locked && B3OURS=build/b3sum.exe B3OFF=$HOME/.cargo/bin/b3sum.exe sh tests/diff_b3sum.sh
@@ -78,6 +78,9 @@ jobs:
           name: dll-windows-x64
           path: |
             build/pblake3.dll
+            build/pblake3c.dll
+            build/api_test_c.exe
+            build/cross_impl.exe
             build/api_test.exe
             build/dll_pascal.exe
             build/b3sum.exe
@@ -103,12 +106,15 @@ jobs:
         env:
           FPC: fpc -Pi386
           CC: /c/msys64/mingw32/bin/gcc
-        run: sh build.sh && sh lib.sh
+        run: sh build.sh && sh lib.sh && sh lib_c.sh
       - uses: actions/upload-artifact@v4
         with:
           name: dll-windows-x86
           path: |
             build/pblake3.dll
+            build/pblake3c.dll
+            build/api_test_c.exe
+            build/cross_impl.exe
             build/api_test.exe
             build/dll_pascal.exe
             build/b3sum.exe

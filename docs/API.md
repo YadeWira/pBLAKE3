@@ -26,6 +26,13 @@ d := Blake3_128(bytes);        // one pass over a TBytes; a second form takes tw
 You allocate the state (`pblake3_state_size()` bytes); every function returns 0, or -1 for a bad argument. See the header
 for the details, and `tests/api_test.c` for a complete caller.
 
+## C without FreePascal (`src/pblake3.c`)
+
+The same C API implemented in plain C: compile `src/pblake3.c` (it includes `src/b3chunks.c`) into your project or as a
+library; no FreePascal, no libc, no allocation. Same output as the Pascal library (the tests run both on random inputs
+and against the official vectors). Use `-DPBLAKE3_BUILD_DLL` to export the functions from a Windows DLL. Single-threaded;
+the Pascal side has `pjablake3mt` and `b3sum` for threads.
+
 ## The chunk routine (`src/b3chunks.c`)
 
 `pblake3_chunks(in, n, counter, cv)` and `pblake3_chunks_kf(in, n, counter, key, flags, cv)` compute the chaining values of

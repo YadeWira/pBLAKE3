@@ -8,12 +8,13 @@ chosen at run time). Output is the official BLAKE3's, always: see [STABILITY.md]
 | `src/pjablake3.pas` | the library: `TBlake3` (`Init`, `Update`, `Final`; `FinalXof` any length; `InitKeyed`; `InitDeriveKey`) and `Blake3_128`. Needs `$R+ $Q+`. |
 | `src/b3chunks.c`, `src/pblake3c.pas` | the C chunk routine (1, 4, 8, 16 chunks at a time, no libc) and the unit that installs it as `Blake3Chunks` |
 | `src/pjablake3mt.pas` | big inputs on several threads (same hash) |
+| `src/pblake3.c` | the whole of BLAKE3 in plain C behind the same C API (no FreePascal, no libc), SIMD included: for C projects that cannot load the Pascal library |
 | `src/pblake3dll.pas`, `include/pblake3.h` | the C API as a shared library (`pblake3.dll`, `libpblake3.so`, `libpblake3.dylib`) |
 | `src/b3sum.pas` | `b3sum`, the official tool's format: hash, `--keyed`, `--derive-key`, `-l`, `--raw`, `-c`, `--num-threads` |
 | `tests/` | official vectors, SIMD-level diff, differential test against the official `b3sum`, fuzz |
 
 API reference: [docs/API.md](docs/API.md). Build and test: `./build.sh` (`FPC=`, `CC=`; extra flags go to the C compiler, e.g. `-m32`); the shared library and
-its C API: `./lib.sh`. Targets in CI: Linux x64/x86/arm64, macOS arm64, Windows x64/x86 (also XP and 7), and
+its C API: `./lib.sh`; the plain C implementation, and it against the Pascal one: `./lib_c.sh`. Targets in CI: Linux x64/x86/arm64, macOS arm64, Windows x64/x86 (also XP and 7), and
 big-endian PowerPC64 under qemu (`scripts/fpc-ppc64be.sh` builds the cross compiler; the shared library is not
 tested on big-endian).
 
