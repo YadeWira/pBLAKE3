@@ -17,10 +17,16 @@ How that is kept honest, on every push (CI, 7 targets):
 ## Interfaces
 
 Stable (a change needs a new major version and a notice to PJA first; additions are allowed in any release):
+- the unit name `pjablake3` and its types `THash16` and `TCvWords`.
 - `pjablake3`: `TBlake3` with `Init`, `Update`, `Final`, `FinalXof`, `InitKeyed`, `InitDeriveKey`; `Blake3_128`
   (both forms); `Blake3Chunks` and the `TBlake3Chunks` signature (and `Blake3ChunksKF`, its keyed twin).
+- `pblake3_chunks_level(max)` in `src/b3chunks.c` (caps the SIMD level 0..3 and returns what the CPU can do; PJA's tests walk every path with it).
 - `src/b3chunks.c`: `pblake3_chunks(in, n, counter, cv)` and `pblake3_chunks_kf(in, n, counter, key, flags, cv)` (the hooks' C side; it takes no memory and calls no library).
 - the C API of `include/pblake3.h` (`PBLAKE3_API_VERSION`; a function is never changed or removed inside a version).
+
+**Take `src/pja.inc` with the unit.** `pjablake3` starts with `{$I pja.inc}` (`$mode objfpc`, `$H+`, `$R+`, `$Q+`, `advancedrecords`) and
+refuses to compile without range and overflow checks. The file is in this repository; a project that copies the
+unit without PJA has to copy it too (PJA's own `pja.inc` is the same).
 
 Not promised: the speed of any path, which SIMD level is used, the internals of `TBlake3`, the thread unit
 `pjablake3mt` (it may change), and `b3sum`'s options beyond the official ones.

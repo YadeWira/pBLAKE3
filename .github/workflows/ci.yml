@@ -22,6 +22,8 @@ jobs:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y fpc clang
       - run: CC=clang sh build.sh && CC=clang sh lib.sh
+      - name: b3sum against the official one (cargo install b3sum)
+        run: cargo install b3sum --locked && B3OFF=$HOME/.cargo/bin/b3sum sh tests/diff_b3sum.sh
   linux-x86:
     runs-on: ubuntu-24.04
     steps:
@@ -46,6 +48,8 @@ jobs:
       - uses: actions/checkout@v4
       - run: brew install fpc
       - run: sh build.sh && sh lib.sh
+      - name: b3sum against the official one (cargo install b3sum)
+        run: cargo install b3sum --locked && B3OFF=$HOME/.cargo/bin/b3sum sh tests/diff_b3sum.sh
   windows-x64:
     runs-on: windows-latest
     steps:
@@ -66,6 +70,9 @@ jobs:
           FPC: fpc -Px86_64
           CC: /c/msys64/mingw64/bin/clang
         run: sh build.sh && sh lib.sh
+      - name: b3sum against the official one (cargo install b3sum)
+        shell: bash
+        run: cargo install b3sum --locked && B3OURS=build/b3sum.exe B3OFF=$HOME/.cargo/bin/b3sum.exe sh tests/diff_b3sum.sh
       - uses: actions/upload-artifact@v4
         with:
           name: dll-windows-x64

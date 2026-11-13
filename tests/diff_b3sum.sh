@@ -25,7 +25,7 @@ done
 f=$T/f40000001
 same "$($OFF < "$f")" "$($OURS < "$f")" "stdin"
 same "$($OFF --raw -l 77 "$f" | od -An -tx1)" "$($OURS --raw -l 77 "$f" | od -An -tx1)" "raw"
-printf 'x' > "$T/we\\ird"; same "$($OFF "$T/we\\ird" | sed "s#$T/##")" "$($OURS "$T/we\\ird" | sed "s#$T/##")" "escaped name"
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) printf 'x' > "$T/we\\ird"; same "$($OFF "$T/we\\ird" | sed "s#$T/##")" "$($OURS "$T/we\\ird" | sed "s#$T/##")" "escaped name" ;; esac
 ( cd "$T" && $OFF f1025 f65536 > sums.txt && $OURS -c sums.txt > chk.txt && grep -c ': OK' chk.txt | grep -q '^2$' ) && cells=$((cells+1)) || { fails=$((fails+1)); echo "DIFF: -c"; }
 echo "$cells comparisons, $fails differences"
 [ "$fails" -eq 0 ]

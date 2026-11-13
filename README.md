@@ -12,7 +12,7 @@ chosen at run time). Output is the official BLAKE3's, always: see [STABILITY.md]
 | `src/b3sum.pas` | `b3sum`, the official tool's format: hash, `--keyed`, `--derive-key`, `-l`, `--raw`, `-c`, `--num-threads` |
 | `tests/` | official vectors, SIMD-level diff, differential test against the official `b3sum`, fuzz |
 
-Build and test: `./build.sh` (`FPC=`, `CC=`; extra flags go to the C compiler, e.g. `-m32`); the shared library and
+API reference: [docs/API.md](docs/API.md). Build and test: `./build.sh` (`FPC=`, `CC=`; extra flags go to the C compiler, e.g. `-m32`); the shared library and
 its C API: `./lib.sh`. Targets in CI: Linux x64/x86/arm64, macOS arm64, Windows x64/x86 (also XP and 7), and
 big-endian PowerPC64 under qemu (`scripts/fpc-ppc64be.sh` builds the cross compiler; the shared library is not
 tested on big-endian).
