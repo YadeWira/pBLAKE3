@@ -10,9 +10,20 @@ const BUFSZ = 8 * 1024 * 1024;      { a multiple of 1024 }
 var
   mode: TMode = mPlain; key: array[0..31] of Byte; context: AnsiString = '';
   outLen: SizeInt = 32; threads: Integer = 0; raw: Boolean = False; noNames: Boolean = False;
-  check: Boolean = False; failed: Boolean = False; stdinUsed: Boolean = False;
+  check: Boolean = False; failed: Boolean = False;
 
 procedure Fail(const msg: string); begin Writeln(StdErr, 'b3sum: ', msg); failed := True; end;
+
+{ "No such file or directory (os error 2)", as the official tool says it }
+function OsMsg(code: Integer): string;
+begin Result := SysErrorMessage(code) + ' (os error ' + IntToStr(code) + ')'; end;
+
+{ A read that fails is an error, never an end of file (THandleStream.Read turns -1 into 0, which would hash half a file). }
+function ReadFd(h: THandle; var buf; n: SizeInt): SizeInt;
+begin
+  Result := FileRead(h, buf, n);
+  if Result < 0 then raise Exception.Create(OsMsg(GetLastOSError));
+end;
 
 function Hex(const x: array of Byte; n: SizeInt): string; var i: SizeInt;
 begin Result := ''; for i := 0 to n - 1 do Result := Result + LowerCase(IntToHex(x[i], 2)); end;
@@ -22,18 +33,18 @@ begin Result := ''; for i := 0 to n - 1 do Result := Result + LowerCase(IntToHex
 type
   TReader = class(TThread)
   private
-    st: TStream;
+    st: THandle;
   protected
     procedure Execute; override;
   public
-    constructor Make(s: TStream);
+    constructor Make(s: THandle);
   end;
 const NBUF = 3;
 var
   ring: array[0..NBUF - 1] of array of Byte; rlen: array[0..NBUF - 1] of SizeInt;
   fullEv, emptyEv: array[0..NBUF - 1] of PRTLEvent; rerr: string; rdone: PRTLEvent;
 
-constructor TReader.Make(s: TStream);
+constructor TReader.Make(s: THandle);
 begin inherited Create(True); st := s; FreeOnTerminate := True; end;
 
 procedure TReader.Execute;
@@ -45,7 +56,7 @@ begin
       RTLEventWaitFor(emptyEv[j]);
       have := 0;
       repeat
-        got := st.Read(ring[j][have], BUFSZ - have);
+        got := ReadFd(st, ring[j][have], BUFSZ - have);
         if got <= 0 then Break;
         Inc(have, got);
       until have = BUFSZ;
@@ -58,7 +69,7 @@ begin
   RTLEventSetEvent(rdone);
 end;
 
-function HashStream(s: TStream): string;
+function HashStream(s: THandle): string;
 var h: TBlake3; o: array of Byte; j, nx: Integer; ready: array[0..NBUF - 1] of Boolean; rd: TReader;
   procedure WaitFull(k: Integer);
   begin if not ready[k] then begin RTLEventWaitFor(fullEv[k]); ready[k] := True; end; end;
@@ -96,16 +107,18 @@ begin
 end;
 
 function HashFile(const name: string; out hx: string): Boolean;
-var s: TStream;
+var h: THandle; own: Boolean;
 begin
   Result := False; hx := '';
   try
-    if name = '-' then begin
-      if stdinUsed then begin Fail('stdin was already used'); Exit; end;
-      stdinUsed := True; s := THandleStream.Create(StdInputHandle);
-    end else s := TFileStream.Create(name, fmOpenRead or fmShareDenyWrite);
-    try hx := HashStream(s); Result := True; finally s.Free; end;
-  except on e: Exception do Fail(name + ': ' + e.Message); end;
+    if name = '-' then begin h := StdInputHandle; own := False; end
+    else begin
+      h := FileOpen(name, fmOpenRead or fmShareDenyNone); own := True;
+      if h = THandle(-1) then raise Exception.Create(OsMsg(GetLastOSError));
+    end;
+    try hx := HashStream(h); Result := True;
+    finally if own then FileClose(h); end;
+  except on e: Exception do begin hx := e.Message; if not check then Fail(name + ': ' + e.Message); end; end;
 end;
 
 function Escaped(const name: string; out esc: string): Boolean;
@@ -148,34 +161,63 @@ begin
   else Writeln(hx, '  ', name);
 end;
 
-procedure DoCheck(const listFile: string);
-var l: TStringList; line, want, name, hx: string; esc: Boolean; ok, bad, miss: Integer; p: Integer;
+function ParseHex32(const h: string; out valid: Boolean): string;
+var i: Integer;
 begin
-  l := TStringList.Create; ok := 0; bad := 0; miss := 0;
+  Result := ''; valid := True;
+  for i := 1 to Length(h) do if not (h[i] in ['0'..'9', 'a'..'f']) then begin valid := False; Exit; end;
+  Result := h;
+end;
+
+{ -c, as the official tool does it: every line "<64 lowercase hex>  <name>" (a leading backslash escapes the name); a blank
+  line, a bad line, a wrong hash and a file that cannot be read each count as a failure, the others are reported
+  as "name: OK" / "name: FAILED" (with the reason, when the file could not be read) }
+procedure DoCheck(const listFile: string);
+var l: TStringList; line, want, name, hx, esc, shown: string; escd, vh: Boolean; bad, p: Integer; fh: THandle; buf2: array[0..65535] of Byte; got: SizeInt; txt: string;
+begin
+  l := TStringList.Create; bad := 0;
   try
     try
-      if listFile = '-' then l.LoadFromStream(THandleStream.Create(StdInputHandle)) else l.LoadFromFile(listFile);
-    except on e: Exception do begin Fail(listFile + ': ' + e.Message); Exit; end; end;
+      if listFile = '-' then begin
+        txt := '';
+        repeat got := ReadFd(StdInputHandle, buf2, SizeOf(buf2)); if got > 0 then begin SetLength(txt, Length(txt) + got); Move(buf2[0], txt[Length(txt) - got + 1], got); end; until got <= 0;
+        l.Text := txt;
+      end else begin
+        fh := FileOpen(listFile, fmOpenRead or fmShareDenyNone);
+        if fh = THandle(-1) then raise Exception.Create(OsMsg(GetLastOSError));
+        txt := '';
+        try repeat got := ReadFd(fh, buf2, SizeOf(buf2)); if got > 0 then begin SetLength(txt, Length(txt) + got); Move(buf2[0], txt[Length(txt) - got + 1], got); end; until got <= 0; finally FileClose(fh); end;
+        l.Text := txt;
+      end;
+    except on e: Exception do begin Writeln(StdErr, 'Error: ', e.Message); Halt(1); end; end;
     for line in l do begin
-      if line = '' then Continue;
-      esc := line[1] = '\';
-      if esc then want := Copy(line, 2, MaxInt) else want := line;
+      if line = '' then begin Writeln(StdErr, 'b3sum: Empty line'); Inc(bad); Continue; end;
+      escd := line[1] = '\';
+      if escd then want := Copy(line, 2, MaxInt) else want := line;
       p := Pos('  ', want);
-      if p < 2 then begin Fail('improperly formatted line: ' + line); Continue; end;
-      name := Copy(want, p + 2, MaxInt); want := LowerCase(Copy(want, 1, p - 1));
-      if esc then name := Unescape(name);
-      if not HashFile(name, hx) then begin Inc(miss); Writeln(name, ': FAILED (could not read)'); Continue; end;
-      if Copy(hx, 1, Length(want)) = want then begin Inc(ok); Writeln(name, ': OK'); end
-      else begin Inc(bad); Writeln(name, ': FAILED'); end;
+      if p < 1 then begin Writeln(StdErr, 'b3sum: Invalid check line format'); Inc(bad); Continue; end;
+      name := Copy(want, p + 2, MaxInt); want := Copy(want, 1, p - 1);
+      ParseHex32(want, vh);
+      if not vh then begin Writeln(StdErr, 'b3sum: Invalid hex'); Inc(bad); Continue; end;
+      if Length(want) <> 64 then begin Writeln(StdErr, 'b3sum: Invalid hash length'); Inc(bad); Continue; end;
+      if escd then name := Unescape(name);
+      if Escaped(name, esc) then shown := '\' + esc else shown := name;
+      outLen := 32;
+      if HashFile(name, hx) then begin
+        if hx = want then Writeln(shown, ': OK') else begin Inc(bad); Writeln(shown, ': FAILED'); end;
+      end else begin
+        Inc(bad); Writeln(shown, ': FAILED (', hx, ')');
+      end;
     end;
   finally l.Free; end;
-  if (bad > 0) or (miss > 0) then begin
+  if bad > 0 then begin
     failed := True;
-    if bad > 0 then Writeln(StdErr, 'b3sum: WARNING: ', bad, ' computed checksum(s) did NOT match');
+    if bad = 1 then Writeln(StdErr, 'b3sum: WARNING: 1 computed checksum did NOT match')
+    else Writeln(StdErr, 'b3sum: WARNING: ', bad, ' computed checksums did NOT match');
   end;
 end;
 
-var i, n: Integer; a: string; files: TStringList; keyIn: THandleStream; kn, kk: SizeInt;
+var i, n: Integer; a: string; files: TStringList; kn, kk: SizeInt;
 begin
   for i := 0 to NBUF - 1 do begin ring[i] := nil; SetLength(ring[i], BUFSZ); end;
   files := TStringList.Create;
@@ -199,12 +241,12 @@ begin
   end;
   if threads <= 0 then threads := Blake3Cpus;
   if mode = mKeyed then begin
-    keyIn := THandleStream.Create(StdInputHandle); kn := 0;
-    while kn < 32 do begin kk := keyIn.Read(key[kn], 32 - kn); if kk <= 0 then Break; Inc(kn, kk); end;
-    if kn <> 32 then begin Fail('the key must be 32 bytes on stdin'); Halt(2); end;
-    stdinUsed := True;
+    kn := 0;
+    while kn < 32 do begin kk := FileRead(StdInputHandle, key[kn], 32 - kn); if kk <= 0 then Break; Inc(kn, kk); end;
+    if kn <> 32 then begin Writeln(StdErr, 'Error: expected 32 key bytes from stdin, found ', kn); Halt(1); end;
   end;
   if files.Count = 0 then files.Add('-');
+  if raw and (files.Count > 1) then begin Writeln(StdErr, 'Error: Only one filename can be provided when using --raw'); Halt(1); end;
   for n := 0 to files.Count - 1 do
     if check then DoCheck(files[n]) else DoFile(files[n]);
   files.Free;

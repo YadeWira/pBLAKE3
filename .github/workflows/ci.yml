@@ -15,7 +15,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y fpc clang
       - run: CC=clang sh build.sh && CC=clang sh lib.sh && CC=clang sh lib_c.sh
       - name: b3sum against the official one (cargo install b3sum)
-        run: cargo install b3sum --locked && B3OFF=$HOME/.cargo/bin/b3sum sh tests/diff_b3sum.sh
+        run: cargo install b3sum --locked && B3OFF=$HOME/.cargo/bin/b3sum sh tests/diff_b3sum.sh && B3OFF=$HOME/.cargo/bin/b3sum sh tests/edge_b3sum.sh
       - name: both libraries against the official Python binding (every size 0..20000, boundaries, XOF, pieces)
         run: pip install blake3 && python3 tests/py_diff.py build/libpblake3.so build/libpblake3c.so --max 20000 --random 300
       - name: the C code under AddressSanitizer and UBSan
@@ -57,7 +57,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y fpc clang
       - run: CC=clang sh build.sh && CC=clang sh lib.sh && CC=clang sh lib_c.sh
       - name: b3sum against the official one (cargo install b3sum)
-        run: cargo install b3sum --locked && B3OFF=$HOME/.cargo/bin/b3sum sh tests/diff_b3sum.sh
+        run: cargo install b3sum --locked && B3OFF=$HOME/.cargo/bin/b3sum sh tests/diff_b3sum.sh && B3OFF=$HOME/.cargo/bin/b3sum sh tests/edge_b3sum.sh
   linux-x86:
     runs-on: ubuntu-24.04
     steps:
@@ -83,7 +83,7 @@ jobs:
       - run: brew install fpc
       - run: sh build.sh && sh lib.sh && sh lib_c.sh
       - name: b3sum against the official one (cargo install b3sum)
-        run: cargo install b3sum --locked && B3OFF=$HOME/.cargo/bin/b3sum sh tests/diff_b3sum.sh
+        run: cargo install b3sum --locked && B3OFF=$HOME/.cargo/bin/b3sum sh tests/diff_b3sum.sh && B3OFF=$HOME/.cargo/bin/b3sum sh tests/edge_b3sum.sh
   windows-x64:
     runs-on: windows-latest
     steps:
