@@ -25,3 +25,7 @@ $FPC -O3 $FPCPIC -Fusrc -Fisrc -Fo"$OUT" -FU"$OUT/u" -o"$OUT/$LIB" src/pblake3dl
 $CC -O2 $PIC "$@" tests/api_test.c -o "$OUT/api_test$EXE" $LIBS
 "$OUT/api_test$EXE" "$( [ "$LIB" = pblake3.dll ] && echo "$OUT/$LIB" || echo "$PWD/$OUT/$LIB")" tests/official_hash.txt | tr -d '\r' | tee "$OUT/api.txt"
 grep -q ' 0 failures' "$OUT/api.txt"
+# and the library as a FreePascal program loads it (DynLibs)
+$FPC -O2 -Fusrc -Fo"$OUT" -FU"$OUT/u" -o"$OUT/dll_pascal$EXE" tests/dll_pascal.pas > "$OUT/fpc_dp.log" 2>&1 || { cat "$OUT/fpc_dp.log"; exit 1; }
+"$OUT/dll_pascal$EXE" "$( [ "$LIB" = pblake3.dll ] && echo "$OUT/$LIB" || echo "$PWD/$OUT/$LIB")" tests/official_hash.txt | tr -d '\r' | tee "$OUT/dp.txt"
+grep -q ' 0 failures' "$OUT/dp.txt"

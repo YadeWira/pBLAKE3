@@ -72,6 +72,9 @@ jobs:
           path: |
             build/pblake3.dll
             build/api_test.exe
+            build/dll_pascal.exe
+            build/b3sum.exe
+            build/fuzz_split.exe
             build/chunks_diff.exe
             tests/official_hash.txt
   windows-x86:
@@ -100,5 +103,8 @@ jobs:
           path: |
             build/pblake3.dll
             build/api_test.exe
+            build/dll_pascal.exe
+            build/b3sum.exe
+            build/fuzz_split.exe
             build/chunks_diff.exe
             tests/official_hash.txt
