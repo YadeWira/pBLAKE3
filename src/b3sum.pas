@@ -207,5 +207,6 @@ begin
   if files.Count = 0 then files.Add('-');
   for n := 0 to files.Count - 1 do
     if check then DoCheck(files[n]) else DoFile(files[n]);
+  files.Free;
   if failed then Halt(1);
 end.
