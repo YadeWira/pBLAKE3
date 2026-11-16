@@ -20,6 +20,8 @@ jobs:
         run: pip install blake3 && python3 tests/py_diff.py build/libpblake3.so build/libpblake3c.so --max 20000 --random 300
       - name: the C code under AddressSanitizer and UBSan
         run: CC=gcc sh tests/sanitize.sh && CC=clang sh tests/sanitize.sh
+      - name: b3sum with read errors injected in the middle of a file (strace)
+        run: sudo apt-get install -y strace && sh tests/ioerror_b3sum.sh
   # the plain C core on other CPUs under qemu-user: aarch64 and ARM 32-bit (cross libc), big-endian powerpc64 and s390x (no libc)
   qemu-c-core:
     runs-on: ubuntu-24.04
@@ -27,6 +29,13 @@ jobs:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y clang llvm qemu-user binutils-powerpc64-linux-gnu binutils-s390x-linux-gnu gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf libc6-dev-arm64-cross libc6-dev-armhf-cross
       - run: REQUIRE_ALL=1 sh tests/qemu_c_core.sh
+  # big-endian with a C library: the Pascal unit with threads and b3sum on powerpc64, the C library through dlopen on powerpc64 and s390x
+  qemu-be-full:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y fpc fpc-source clang qemu-user binutils-powerpc64-linux-gnu gcc-powerpc64-linux-gnu gcc-s390x-linux-gnu libc6-dev-ppc64-cross libc6-dev-s390x-cross
+      - run: CC=gcc sh build.sh && sh tests/qemu_be_full.sh
   # the plain C implementation with Microsoft's compiler (what a 7-Zip plugin is often built with)
   msvc:
     strategy:
